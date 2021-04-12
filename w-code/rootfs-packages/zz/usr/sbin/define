@@ -1,0 +1,29 @@
+#!/bin/sh
+#LANGUAGE 
+#define words using WordNet dictionary (remote or local db)
+
+[ ! $1 ] && echo -e "\nWordNet 3.0\n\n	Suntax: $0 <word>\n" && exit
+
+#	extract from line 6 (DEFINITIONS)
+#		#CONVERT ] to ]. (']' is usually at the end of every sentence)
+#		convert ' [' to '. ['
+#		convert "ENDOFLINE to ".ENDOFLINE
+def=$(dict -d wn "$@" |
+	tail -n +6 | \
+		sed -e 's/\]/\]\./' \
+			-e 's/ \[/\. \[/' \
+			-e 's/"$/"./')
+echo "$def" | more
+
+[ ! "$def" ] && exit 1
+echo
+
+if [ "$(which speak2)" ]; then 
+	speak2 "$@"
+	sleep 0.6
+	speak2 "$def" 2>/dev/null
+elif [ "$(which speak)" ]; then 
+	speak "$@"
+	sleep 0.6
+	speak "$def"
+fi

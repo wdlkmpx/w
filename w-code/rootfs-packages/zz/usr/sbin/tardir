@@ -1,0 +1,217 @@
+#!/bin/bash
+#w__ 2014
+#this script is safe to use in console mode
+#use xterm to invoke it in a gui environment
+
+function help() {
+	echo "Syntax:
+	$0 -split <dir>
+	$0 -merge <dir>
+	$0 -decomp <dir>
+	$0 -comp <dir>
+
+-comp 	compress all directories within <dir> using TAR
+-decomp	decompress all *.tar.* files in <dir>
+
+These will decompress and COPY contents to:
+-split will create _main and _dev dirs
+-merge will create _merged dir"
+	exit $1
+}
+
+export action=''
+[ ! "$1" ] && echo "ERROR: no args, type $0 -help" && exit
+case "$1" in
+	-h|-help|--help)	help 		; exit  ;;
+	-m|-merge) 		action="merge" 	; shift ;;	
+	-s|-split)		action="split"	; shift ;;
+	-d|-decomp)		action="decomp" ; shift ;;	
+	-c|-comp)		action="comp" 	; shift ;;	
+	*) echo "${0} ERROR: Invalid action: $1" ; exit 1 ;;
+esac
+
+##################
+
+DIR="$@"
+if [ -d "$DIR" ]; then #-e -f
+	[[ $DIR != /* ]] && DIR=$(pwd)/${DIR}  #inputdir is in $(pwd)
+	[[ $DIR == */ ]] && DIR=${DIR%\/}
+else
+	echo 'ERROR: Invalid directory' && exit 1
+fi
+
+echo "=========================================
+$DIR
+========================================="
+
+DIRNAME=${DIR##*/}
+PARENTDIR=${DIR%/*}
+#list="$(find "$DIR" -maxdepth 1)"
+list="$(ls "$DIR" 2>/dev/null)"
+curdir=$(pwd)
+
+cd $DIR #GO TO THE SPECIFIED DIRECTORY
+rm -f ../pinstall_* 2>/dev/null
+rm -f ../puninstall_* 2>/dev/null
+#echo -e "$DIR\n$DIRNAME\n$PARENTDIR" ; exit 
+  
+case $action in
+	merge) 
+		DESTINATION=${DIR}_merged
+		[ -d "$DESTINATION" ] && rm -rf "$DESTINATION"
+		mkdir -p $DESTINATION
+		;;
+	split)
+		DIR_DEV=${DIR}_DEV
+		DIR_MAIN=${DIR}_MAIN
+		mkdir -p $DIR_DEV
+		mkdir -p $DIR_MAIN
+		;;
+esac
+
+#############################################################
+  
+while read ONEFILE ; do
+  
+	[ ! "$ONEFILE" ] && continue
+	ONEFILE=${DIR}/${ONEFILE} ##ls does not return full paths
+	fname=${ONEFILE##*/}
+	#echo $ONEFILE ; continue #DEBUG
+	
+	if [ ! -d "$ONEFILE" ]; then #CONVERT TAR TO DIRS
+
+		####################################
+		#               FILE               #
+		####################################
+	
+		sswitch=''
+		case $fname in
+			*.tar.gz) 	sswitch='-zxf' ; ext='tar.gz'	;;
+			*.pet) 		sswitch='-zxf' ; ext='pet' 		;;
+			*.tgz)		sswitch='-zxf' ; ext='tgz' 		;;
+			*.tar.xz) 	sswitch='-Jxf' ; ext='tar.xz' 	;;
+			*.tar.bz2)	sswitch='-jxf' ; ext='tar.bz2'	;;
+		esac
+		[ ! "$sswitch" ] && continue #not a tar file
+		
+		[ "$action" = "comp" ] && continue #comp does not accept files
+						
+		newfname=${fname%.$ext}
+		NEWDIR=${DIR}/${newfname}
+		[ -d "$NEWDIR" ] && echo "$newfname already exists"  && continue
+		
+		echo "Extracting file: $fname"
+		tar $sswitch "$ONEFILE"
+		fname=$newfname
+		
+		[ ! -d "$NEWDIR" ] && echo "ERROR getting $fname" && continue
+		ONEFILE=$NEWDIR	
+		
+		case $action in
+			decomp) continue ;;
+			merge) del='yes' ;; ## -> COPY-PROC
+			split)
+				## -> COPY-PROC
+				del='yes'
+				case "$ONEFILE" in
+					*_DEV-*) DESTINATION=$DIR_DEV   ; xdev=1 ;;
+					*_DOC-*) DESTINATION=$DIR_DEV   ; xdev=1 ; continue ;;
+					*_NLS-*) echo "Ingoring $fname" ; xdev=1 ; continue ;; #ignore NLS
+					*) DESTINATION=$DIR_MAIN        ; xdev=0 ;;
+				esac
+				;;
+		esac
+			
+	else 
+		
+		####################################
+		#DIRECTORY #no extraction performed#
+		####################################
+		
+		case $action in
+			comp)	echo "Processing dir: $fname"
+					tar -zcf "${fname}.tar.gz" "$fname"
+					continue;;		
+			decomp) continue;;
+			merge) del='no' ;; ## -> COPY-PROC
+			split)
+				## -> COPY-PROC
+				del='no'
+				case "$ONEFILE" in
+					*_DEV-*) DESTINATION=$DIR_DEV   ; xdev=1 ;;
+					*_DOC-*) DESTINATION=$DIR_DEV   ; xdev=1 ; continue ;; 
+					*_NLS-*) echo "Ingoring $fname" ; xdev=1 ; continue ;; #ignore NLS
+					*) DESTINATION=$DIR_MAIN        ; xdev=0 ;;
+				esac
+				;;
+		esac
+		
+	fi
+	
+	################
+	## COPY-PROC  ##
+	################
+
+	case $action in
+		merge) pinstallx='../pinstall_merge'
+			   puninstallx='../puninstall_merge' ;;
+		split) pinstallx='../pinstall_main'
+			   [ $xdev -eq 1 ] && pinstallx='../pinstall_dev'
+				puninstallx='../puninstall_main'
+			   [ $xdev -eq 1 ] && puninstallx='../puninstall_dev' ;;			   
+	esac
+	
+	[ -f $ONEFILE/pet.specs ] && rm -f $ONEFILE/pet.specs
+	if [ -f $ONEFILE/pinstall.sh ] ; then
+		if [ ! -f $pinstallx ] ; then
+			echo '#!/bin/bash' > $pinstallx
+			chmod +x $pinstallx
+		fi
+		( 
+		echo -e "\n#======================================="
+		echo -e "#	$fname"
+		echo -e "#======================================="
+		echo -e "$(cat $ONEFILE/pinstall.sh | sed '1d')" 
+		) >> $pinstallx
+	fi	
+	##copy of the above
+	if [ -f $ONEFILE/puninstall.sh ] ; then
+		if [ ! -f $puninstallx ] ; then
+			echo '#!/bin/bash' > $puninstallx
+			chmod +x $puninstallx
+		fi
+		( 
+		echo -e "\n#======================================="
+		echo -e "#	$fname"
+		echo -e "#======================================="
+		echo -e "$(cat $ONEFILE/puninstall.sh | sed '1d')" 
+		) >> $puninstallx
+	fi
+	
+	
+	echo "Processing dir: $fname"
+	cp -af --remove-destination $ONEFILE/* $DESTINATION
+	rm -rf "$ONEFILE" #delete directory (there's the tar file)
+		
+done <<< "$list"
+
+
+pinstallz='../pinstall_merge ../pinstall_dev ../pinstall_main ../puninstall_merge ../puninstall_dev ../puninstall_main'
+for pinst in $pinstallz ; do
+	if [ -f $pinst ] ; then
+		case $pinst in
+			../pinstall_merge)   mv -fv ../pinstall_merge ${DIR}_merged/pinstall.sh ;;
+			../pinstall_dev)     mv -fv ../pinstall_dev   ${DIR}_DEV/pinstall.sh    ;;
+			../pinstall_main)    mv -fv ../pinstall_main  ${DIR}_MAIN/pinstall.sh   ;;
+			../puninstall_merge) mv -fv ../puninstall_merge ${DIR}_merged/puninstall.sh ;;
+			../puninstall_dev)   mv -fv ../puninstall_dev   ${DIR}_DEV/puninstall.sh    ;;
+			../puninstall_main)  mv -fv ../puninstall_main  ${DIR}_MAIN/puninstall.sh   ;;			
+		esac
+	fi
+done
+
+####################################
+cd ${curdir}
+echo "Done"
+
+### END ###

@@ -1,0 +1,34 @@
+#!/bin/sh
+#w__ 2015
+
+export text="$@"
+
+if [ ! "$text" ] ; then
+	text=$(yad --title="WordReference" \
+		--window-icon="/usr/share/pixmaps/wordreference.png" \
+		--text="Enter the word to translate online using WordReference:" \
+		--entry --center)
+fi
+[ ! "$text" ] && exit 1
+
+function Show() {
+	wr $text
+	read zzz
+}
+export -f Show
+
+lxterminal=1
+
+if [ "$lxterminal" ] ; then
+	scriptx="/tmp/trans$$"
+	echo "#!/bin/sh
+	wr $text
+	read zzz
+	rm -f $scriptx" > $scriptx
+	chmod +x $scriptx
+	exec lxterminal --title="$text" -e $scriptx
+else
+	exec xterm -bg black -fg white -e bash -c Show #-geometry 100x100+100+100
+fi
+
+### END ###

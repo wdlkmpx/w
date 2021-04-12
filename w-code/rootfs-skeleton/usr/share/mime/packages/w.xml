@@ -1,0 +1,363 @@
+<?xml version="1.0"?>
+<!-- PLinux-specific mime info -->
+
+<mime-info xmlns='http://www.freedesktop.org/standards/shared-mime-info'>
+
+	<mime-type type="application/pet">
+		<comment>PET archive</comment>
+		<glob pattern="*.pet"/>
+	</mime-type>
+
+	<mime-type type="application/x-ext2-image">
+		<comment>ext2 filesystem in a file</comment>
+		<glob pattern="*.2fs"/>
+		<glob pattern="*.ext2"/>
+	</mime-type>
+
+	<mime-type type="application/x-ext3-image">
+		<comment>ext3 filesystem in a file</comment>
+		<glob pattern="*.3fs"/>
+		<glob pattern="*.ext3"/>
+	</mime-type>
+
+	<mime-type type="application/x-ext4-image">
+		<comment>ext4 filesystem in a file</comment>
+		<glob pattern="*.4fs"/>
+		<glob pattern="*.ext4"/>
+	</mime-type>
+
+	<mime-type type="application/x-squashfs-image">
+		<comment>squashfs filesystem in a file</comment>
+		<glob pattern="*.sfs"/>
+		<glob pattern="*.squashfs"/>
+	</mime-type>
+
+	<mime-type type="application/x-bfe">
+		<comment>Bcrypt encrypted file</comment>
+		<glob pattern="*.bfe"/>
+	</mime-type>
+
+	<mime-type type="application/x-delta">
+		<comment>Xdelta difference file</comment>
+		<glob pattern="*.delta"/>
+	</mime-type>
+
+	<mime-type type="application/x-ccrypt">
+		<comment>Ccrypt encrypted file</comment>
+		<glob pattern="*.cpt"/>
+	</mime-type>
+
+	<mime-type type="text/x-genie">
+		<comment>Genie source file</comment>
+		<glob pattern="*.gs"/>
+	</mime-type>
+
+	<mime-type type="text/x-bacon">
+		<comment>BaCon source file</comment>
+		<glob pattern="*.bac"/>
+	</mime-type>
+
+	<mime-type type="application/initramfs-gz">
+		<comment>Linux initramfs, compressed</comment>
+		<glob pattern="initrd.gz"/>
+		<glob pattern="initrd.xz"/>
+	</mime-type>
+
+	<mime-type type="application/x-partclone">
+		<comment>Partclone Backup</comment>
+		<glob pattern="*.partclone"/>
+		<glob pattern="*.partclone.gz"/>
+		<glob pattern="*.partclone.bz2"/>
+		<glob pattern="*.partclone.xz"/>
+		<glob pattern="*.partclone.lzo"/>
+	</mime-type>
+
+	<mime-type type="text/x-linklist">
+		<comment>Link list</comment>
+		<glob pattern="*.links"/>
+		<glob pattern="*.linklist"/>
+	</mime-type>
+
+	<mime-type type="video/dvd-ifo">
+		<comment>IFO file</comment>
+		<glob pattern="*.ifo"/>
+	</mime-type>
+
+	<mime-type type="application/linux-kernel">
+		<comment>Linux kernel</comment>
+		<glob pattern="vmlinuz*"/>
+	</mime-type>
+
+<!-- Linux distributions -->
+
+	<mime-type type="application/x-archlinux-package-gz">
+		<alias type="application/x-pkg"/>
+		<comment>Arch Linux package</comment>
+		<sub-class-of type="application/zip"/>
+		<glob pattern="*.pkg.tar.gz"/>
+	</mime-type>
+
+	<mime-type type="application/x-archlinux-package-xz">
+		<comment>Arch Linux package</comment>
+		<sub-class-of type="application/x-xz"/>
+		<glob pattern="*.pkg.tar.xz"/>
+	</mime-type>
+  
+	<mime-type type="application/x-archlinux-package-zst">
+		<comment>Arch Linux package</comment>
+		<sub-class-of type="application/x-zst"/>
+		<glob pattern="*.pkg.tar.zst"/>
+	</mime-type>
+  
+	<mime-type type="application/pfs">
+		<comment>PLinuxrus package</comment>
+		<glob pattern="*.pfs"/>
+	</mime-type>
+
+	<mime-type type="application/sb">
+		<comment>Slax module</comment>
+		<glob pattern="*.sb"/>
+	</mime-type>
+
+	<mime-type type="application/xbps">
+		<comment>Void Linux package</comment>
+		<glob pattern="*.xbps"/>
+	</mime-type>
+
+	<mime-type type="application/spack">
+		<comment>0Linux package</comment>
+		<glob pattern="*.spack"/>
+	</mime-type>
+
+	<mime-type type="application/ipk">
+		<comment>OpenWRT package</comment>
+		<glob pattern="*.ipk"/>
+	</mime-type>
+
+	<mime-type type="application/tazpkg">
+		<comment>Slitaz package</comment>
+		<glob pattern="*.tazpkg"/>
+	</mime-type>
+
+	<mime-type type="application/nutyx">
+		<comment>Nutyx package</comment>
+		<glob pattern="*.cards.tar.xz"/>
+		<glob pattern="*.cards.tar.gz"/>
+		<glob pattern="*.cards.tar.bz2"/>
+	</mime-type>
+  
+	<mime-type type="application/pisi">
+		<comment>Pardus package</comment>
+		<glob pattern="*.pisi"/>
+	</mime-type>
+
+	<mime-type type="application/tcz">
+		<comment>Tiny Core Linux package</comment>
+		<glob pattern="*.tcz"/>
+	</mime-type>
+
+	<mime-type type="application/dsl">
+		<comment>Damn Small Linux package</comment>
+		<glob pattern="*.dsl"/>
+	</mime-type>
+
+	<mime-type type="application/eopkg">
+		<comment>Solus Package</comment>
+		<glob pattern="*.eopkg"/>
+	</mime-type>
+
+	<mime-type type="application/slp">
+		<comment>Stampede Linux Package</comment>
+		<glob pattern="*.slp"/>
+	</mime-type>
+
+	<mime-type type="application/porteus-module">
+		<comment>Porteus Module</comment>
+		<glob pattern="*.xzm"/>
+		<glob pattern="*.lzm"/>
+	</mime-type>
+
+	<mime-type type="application/tce">
+		<comment>Tiny Core Linux Extension</comment>
+		<glob pattern="*.tce"/>
+		<glob pattern="*.tcel"/>
+		<glob pattern="*.tcem"/>
+	</mime-type>
+
+	<mime-type type="application/xpak">
+		<comment>Gentoo precompiled package</comment>
+		<glob pattern="*.xpak"/>
+	</mime-type>
+
+<!-- CD Images -->
+
+	<mime-type type="application/x-cdi-image">
+		<comment>DiscJuggler Disc Image</comment>
+		<glob pattern="*.cdi"/>
+	</mime-type>
+
+	<mime-type type="application/x-daa-image">
+		<comment>Direct Access Archive</comment>
+		<glob pattern="*.daa"/>
+	</mime-type>
+
+	<mime-type type="application/x-mdf-image">
+		<comment>Alcohol 120% .mdf image</comment>
+		<glob pattern="*.mdf"/>
+	</mime-type>
+
+	<mime-type type="application/x-pdi-image">
+		<comment>InstantCopy Disc Image</comment>
+		<glob pattern="*.pdi"/>
+	</mime-type>
+
+	<mime-type type="application/x-uif-image">
+		<comment>Universal Image Format Disc Image</comment>
+		<glob pattern="*.uif"/>
+	</mime-type>
+
+	<mime-type type="application/x-gbi-image">
+		<comment>gBurner Image</comment>
+		<glob pattern="*.gbi"/>
+	</mime-type>
+
+	<mime-type type="application/x-b5i-image">
+		<comment>BlindWrite 5 Disk Image</comment>
+		<glob pattern="*.b5i"/>
+	</mime-type>
+
+	<mime-type type="application/x-bwi-image">
+		<comment>BlindWrite Disk Image</comment>
+		<glob pattern="*.bwi"/>
+	</mime-type>
+
+<!-- GAMES -->
+
+	<mime-type type="application/x-genesis-rom">
+		<comment>Sega Genesis/Megadrive ROM</comment>
+		<glob pattern="*.smd"/>
+	</mime-type>
+
+	<mime-type type="application/x-gameboy-rom">
+		<comment>Game Boy (Color) ROM</comment>
+		<glob pattern="*.gbc"/>
+	</mime-type>
+
+	<mime-type type="application/x-virtualboy-rom">
+		<comment>Virtual Boy ROM</comment>
+		<glob pattern="*.vboy"/>
+	</mime-type>
+
+	<mime-type type="application/x-pc-engine-sgx-rom">
+		<comment>SuperGrafx ROM</comment>
+		<glob pattern="*.sgx"/>
+	</mime-type>
+
+	<mime-type type="application/x-atari-lynx-rom">
+		<comment>Atari Lynx ROM</comment>
+		<glob pattern="*.lnx"/>
+	</mime-type>
+
+	<mime-type type="application/x-neogeo-pocket-rom">
+		<comment>NeoGeo Pocket (Color) ROM</comment>
+		<glob pattern="*.npc"/>
+		<glob pattern="*.ngp"/>
+	</mime-type>
+
+	<mime-type type="application/x-wonderswan-rom">
+		<comment>Wonder Swan (Color) ROM</comment>
+		<glob pattern="*.wsc"/>
+		<glob pattern="*.wsr"/>
+	</mime-type>
+
+<!-- misc apps -->  
+
+	<!-- audacity.xml -->
+	<mime-type type="application/x-audacity-project">
+		<comment>Audacity project</comment>
+		<glob pattern="*.aup"/>
+	</mime-type>
+
+	<!-- homebank.xml -->
+	<mime-type type="application/x-homebank">
+		<sub-class-of type="text/plain"/>
+		<comment>HomeBank File</comment>
+		<glob pattern="*.xhb"/>
+	</mime-type>
+
+	<!-- bluefish.xml -->
+	<mime-type type="application/x-bluefish-project">
+		<comment>Bluefish project file</comment>
+		<sub-class-of type="text/plain"/>
+		<glob pattern="*.bfproject"/>
+	</mime-type>
+	<mime-type type="application/x-bluefish-language2">
+		<comment>Bluefish language definition file</comment>
+		<glob pattern="*.bflang2"/>
+		<glob pattern="*.bfinc"/>
+	</mime-type>
+
+	<!-- bluetooth-manager.xml -->
+	<mime-type type="audio/x-sbc">
+		<glob pattern="*.sbc"/>
+	</mime-type>
+	<mime-type type="application/x-hcidump">
+		<glob pattern="*.hcidump"/>
+	</mime-type>
+	<mime-type type="application/x-btsnoop">
+		<comment>Frontline BTSnoop File</comment>
+		<magic priority="80">
+			<match value="btsnoop" type="string" offset="0"/>
+		</magic>
+		<glob pattern="*.btsnoop"/>
+	</mime-type>
+	<mime-type type="application/x-pktlog">
+		<comment>Apple Packet Logger File</comment>
+		<glob pattern="*.pklg"/>
+	</mime-type>
+
+<!-- Windows-specific mime info -->
+
+	<mime-type type="application/x-bin">
+		<comment>Binary File</comment>
+		<glob pattern="*.bin"/>
+	</mime-type>
+
+	<mime-type type="application/x-dll">
+		<comment>MS Windows DLL</comment>
+		<glob pattern="*.dll"/>
+	</mime-type>
+
+	<mime-type type="application/x-msi">
+		<comment>Windows Installer package</comment>
+		<glob pattern="*.msi"/>
+	</mime-type>
+
+	<mime-type type="application/x-win-script">
+		<comment>Windows Shell Script</comment>
+		<sub-class-of type="text/plain"/>
+		<glob pattern="*.cmd"/>
+		<glob pattern="*.bat"/>
+	</mime-type>
+
+	<mime-type type="application/x-img">
+		<comment>Disk image</comment>
+		<glob pattern="*.img"/>
+		<glob pattern="*.vhd"/>
+		<glob pattern="*.hdd"/>
+		<glob pattern="*.hfv"/>
+		<glob pattern="*.vdi"/>
+		<glob pattern="*.dmg"/>
+		<glob pattern="*.hdd"/>
+		<glob pattern="*.vmdk"/>
+		<glob pattern="*.gdrive"/>
+	</mime-type>
+  
+	<mime-type type="application/x-vfd">
+		<comment>Floppy disk image</comment>
+		<glob pattern="*.vfd"/>
+		<glob pattern="*.ima"/>
+		<glob pattern="*.dsk"/>
+	</mime-type>
+
+</mime-info>

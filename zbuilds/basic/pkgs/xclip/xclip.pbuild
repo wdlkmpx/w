@@ -1,0 +1,37 @@
+# xclip
+
+. ../versions
+. ../../func
+. ../../build.conf
+
+VER=$xclip_ver
+
+URL=https://github.com/astrand/xclip/archive
+PKG=xclip
+COMP=tar.gz
+DESC="cli clipboard tool"
+DEPS=
+CAT=BuildingBlock
+DESKTOP=xclip.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+# comment these 2 below if you use a custom package() function
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not
+
+ARCH=$(uname -m)
+case $ARCH in # set in build.conf
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+# main
+retrieve ${VER}.${COMP} ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+
+( cd ${PKG}-${VER} ; ./bootstrap )
+
+build_configure $PKG $VER $LIBDIR
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT

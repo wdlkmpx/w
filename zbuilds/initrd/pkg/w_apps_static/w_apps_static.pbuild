@@ -1,0 +1,25 @@
+#!/bin/sh
+# special pkg [woofce apps]
+
+. ../../func
+
+VER=0.1
+SRC=w_apps
+PKG=w_apps
+CWD=${PWD}
+INSTALLED_FILE='bin/vercmp'
+
+build() {
+	cp -af w_apps ${SRC}-${VER}
+	cd ${SRC}-${VER}
+	_make
+	standard_make_install
+}
+
+# main
+[ "$DLD_ONLY" = "yes" ] && exit
+check_installed_file
+build
+standard_cleanup
+
+### END ###

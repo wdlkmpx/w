@@ -1,0 +1,46 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+# ====================================================
+
+VER=4.2
+URL=https://github.com/dosfstools/dosfstools/releases/download/v${VER}
+SRC=dosfstools
+PKG=dosfstools_static
+COMP=tar.gz
+DESC=""
+DEPS=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='sbin/fsck.fat'
+
+build() {
+	cd ${SRC}-${VER}
+	EXE=dosfstools
+	opts="--prefix=/usr --sbindir=/sbin"
+	_configure
+	_make ${MKFLG} LDFLAGS=-static
+
+	EXE='src/fsck.fat'
+	abort_if_file_not_found ${EXE}
+
+	strip_all_binaries
+	standard_make_install
+}
+
+# main
+retrieve "${SRC}-${VER}.${COMP}"
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup
+

@@ -1,0 +1,247 @@
+#!/bin/sh
+#w
+
+if ! which clamscan &>/dev/null ; then
+	if [ "$DISPLAY" ] ; then
+		yad --center --title="${0##*/}" --text="  Please install the ClamAV package..  " --image=dialog-error --button=gtk-ok:0 ${CDICON}
+	else
+		echo "${0##*/}: Please install the ClamAV package.."
+	fi
+	exit 1
+fi
+
+clamavRC=$HOME/clamavrc
+
+if [ -f $clamavRC ] ; then
+	. $clamavRC
+fi
+
+[ -z "$DIRECTORY_TO_SCAN" ] && DIRECTORY_TO_SCAN=$HOME
+
+[ -z "$SCANMODE_REPORTONLY" ] && SCANMODE_REPORTONLY=true
+[ -z "$SCANMODE_DISINFECT" ] && SCANMODE_DISINFECT=false #--
+[ -z "$SCANMODE_DELETEMALWARE" ] && SCANMODE_DELETEMALWARE=false
+
+[ -z "$HEURISTICS_NO" ] && HEURISTICS_NO=false
+[ -z "$HEURISTICS_DEFAULT" ] && HEURISTICS_DEFAULT=true
+[ -z "$HEURISTICS_MAXIMUM" ] && HEURISTICS_MAXIMUM=false
+
+[ -z "$OPT_LIST_ALL_SCANNED_FILES" ] && OPT_LIST_ALL_SCANNED_FILES=false
+[ -z "$OPT_DONT_SCAN_SUBDIRS" ] && OPT_DONT_SCAN_SUBDIRS=false
+[ -z "$OPTIONS_SCAN_ARCHIVES" ] && OPTIONS_SCAN_ARCHIVES=false
+[ -z "$OPTIONS_SCAN_ADWARE_ETC" ] && OPTIONS_SCAN_ADWARE_ETC=false
+[ -z "$OPTIONS_FOLLOW_SYMLINKS" ] && OPTIONS_FOLLOW_SYMLINKS=false
+[ -z "$OPTIONS_MOUNT" ] && OPTIONS_MOUNT=false
+[ -z "$OPTIONS_SCAN_BOOT" ] && OPTIONS_SCAN_BOOT=false #--
+
+LOGFILE=$HOME/clamav.log
+
+clamav_update() {
+	urxvt -e sh -c "freshclam ; echo -n 'Press <Enter> to continue' ; read VAR"
+}
+export -f clamav_update
+
+clamav_info() {
+	urxvt -e sh -c "clamscan --version ; echo -n 'Press <Enter> to continue' ; read VAR"
+}
+export -f clamav_info
+
+clamav_scan() {
+	urxvt -e sh -c "$cmd 2>&1 | less"
+}
+export -f clamav_scan
+
+export PROG="
+<window title=\"clamav\">
+<vbox>
+<vbox>
+	<frame Path to scan>
+		<vbox>
+		  <hbox>
+			<entry accept=\"directory\">
+				<variable>DIRECTORY_TO_SCAN</variable>
+				<default>${DIRECTORY_TO_SCAN}</default>
+			 </entry>
+			<button>
+				<input file stock=\"gtk-open\"></input>
+				<action type=\"fileselect\">DIRECTORY_TO_SCAN</action>
+			</button>
+		  </hbox>
+		</vbox>
+	</frame>
+	<hbox>
+	  <vbox>
+		<frame $(gettext 'Scan mode')>
+			<vbox>
+				<radiobutton> 
+					<variable>SCANMODE_REPORTONLY</variable>
+					<label>Report only</label>
+					<default>${SCANMODE_REPORTONLY}</default>
+				</radiobutton>
+				<radiobutton sensitive=\"false\"> 
+					<variable>SCANMODE_DISINFECT</variable>
+					<label>Disinfect files if possible</label>
+					<default>${SCANMODE_DISINFECT}</default>
+				</radiobutton>
+				<radiobutton> 
+					<variable>SCANMODE_DELETEMALWARE</variable>
+					<label>Delete files containing malware</label>
+					<default>${SCANMODE_DELETEMALWARE}</default>
+				</radiobutton>
+			</vbox>
+		</frame>
+		<frame Heuristics>
+			<hbox>
+				<radiobutton> 
+					<variable>HEURISTICS_NO</variable>
+					<label>No</label>
+					<default>${HEURISTICS_NO}</default>
+				</radiobutton>
+				<radiobutton> 
+					<variable>HEURISTICS_DEFAULT</variable>
+					<label>Default</label>
+					<default>${HEURISTICS_DEFAULT}</default>
+				</radiobutton>
+				<radiobutton> 
+					<variable>HEURISTICS_MAXIMUM</variable>
+					<label>Maximun</label>
+					<default>${HEURISTICS_MAXIMUM}</default>
+				</radiobutton>
+			</hbox>
+		</frame>
+		<frame Report file>
+		<vbox>
+			<checkbox>
+			    <label>List all scanned files</label>
+				<variable>OPT_LIST_ALL_SCANNED_FILES</variable>
+				<default>${OPT_LIST_ALL_SCANNED_FILES}</default>
+			</checkbox>
+			<entry>
+				<variable>ZZZ</variable>
+				<default>${LOGFILE}</default>
+			</entry>
+			<button>
+				<label>Open</label>
+				<action>geany $LOGFILE &</action>
+			</button>
+		</vbox>
+		</frame>
+	  </vbox>
+	  <vbox>
+		<frame Options>
+			<vbox>
+			  <checkbox>
+				 <label>Do not scan subdirectories</label>
+				 <variable>OPT_DONT_SCAN_SUBDIRS</variable>
+				 <default>${OPT_DONT_SCAN_SUBDIRS}</default>
+			  </checkbox>
+			  <checkbox>
+				 <label>Scan inside archives</label>
+  				 <variable>OPTIONS_SCAN_ARCHIVES</variable>
+  				 <default>${OPTIONS_SCAN_ARCHIVES}</default>
+			  </checkbox>
+			  <checkbox>
+				 <label>Detect Possibly Unwanted Applications.</label>
+  				 <variable>OPTIONS_SCAN_ADWARE_ETC</variable>
+  				 <default>${OPTIONS_SCAN_ADWARE_ETC}</default>
+			  </checkbox>
+			  <checkbox>
+				 <label>Follow symlinks</label>
+  				 <variable>OPTIONS_FOLLOW_SYMLINKS</variable>
+  				 <default>${OPTIONS_FOLLOW_SYMLINKS}</default>
+			  </checkbox>
+			  <checkbox>
+				 <label>Don't descent directories on other filesystem</label>
+  				 <variable>OPTIONS_MOUNT</variable>
+  				 <default>${OPTIONS_MOUNT}</default>
+			  </checkbox>
+			  <checkbox sensitive=\"false\">
+				 <label>Scan boot sectors</label>
+  				 <variable>OPTIONS_SCAN_BOOT</variable>
+  				 <default>${OPTIONS_SCAN_BOOT}</default>
+			  </checkbox>
+			</vbox>
+		</frame>
+	  </vbox>
+	</hbox>
+</vbox>
+
+<hbox>
+		<button>
+			<label>  SCAN  </label>
+			<action>EXIT:scan</action>
+		</button>
+		<button>
+			 <label>  UPDATE </label>
+			<action>clamav_update &</action>
+		</button>
+		<button>
+			<label> INFO </label>
+			<action>clamav_info &</action>
+		</button>
+		<button>
+			<label> INFO </label>
+			<action>clamav_info &</action>
+		</button>
+		<button>
+			<label> CLOSE </label>
+			<action>clamav_info &</action>
+		</button>
+		<text><label>\"                               \"</label></text>
+	</hbox>
+</vbox>
+</window>
+"
+
+res="`gtkdialog --center -p PROG`"
+echo "$res" > $clamavRC
+eval "$res"
+
+if [ "$EXIT" = "scan" ] ; then
+
+	cmd="--log=${LOGFILE} --bell --max-filesize=5M --max-files=10"
+
+	#if [ "$SCANMODE_DISINFECT" = "true" ] ; then
+	#	cmd+=" --disinfect"
+	if [ "$SCANMODE_DELETEMALWARE" = "true" ] ; then
+		cmd+=" --infected --remove=yes"
+	else
+		cmd+=" --infected --remove=no"
+	fi
+
+	if [ "$OPTIONS_SCAN_ARCHIVES" = "true" ] ; then
+		cmd+=" --scan-archive=yes"
+	else
+		cmd+=" --scan-archive=no"
+	fi
+	[ "$OPT_DONT_SCAN_SUBDIRS" != "true" ] && cmd+=" --recursive"
+	#[ "$OPTIONS_SCAN_BOOT" = "true" ] && cmd+=" --boot"
+	if [ "$OPTIONS_SCAN_ADWARE_ETC" = "true" ] ; then
+		cmd+=" --detect-pua=yes"
+	else
+		cmd+=" --detect-pua=no"
+	fi
+	[ "$OPT_LIST_ALL_SCANNED_FILES" = "true" ] && cmd+=" --verbose"
+	if [ "$OPTIONS_FOLLOW_SYMLINKS" = "true" ] ; then
+		cmd+=" --follow-dir-symlinks=1 --follow-file-symlinks=1"
+	else
+		cmd+=" --follow-dir-symlinks=0 --follow-file-symlinks=0"
+	fi
+	[ "$OPTIONS_MOUNT" = "true" ] &&  cmd+=" --cross-fs"
+
+	if [ "$HEURISTICS_NO" = "true" ] ; then
+		cmd+=" --phishing-cloak=no"
+	elif [ "$HEURISTICS_DEFAULT" = "true" ] ; then
+		cmd+=" --phishing-cloak=no --heuristic-scan-precedence=yes"
+	elif [ "$HEURISTICS_MAXIMUM" = "true" ] ; then
+		cmd+=" --heuristic-scan-precedence=yes"
+	fi
+
+	export cmd="clamscan $cmd ${DIRECTORY_TO_SCAN}"
+	echo $cmd
+	clamav_scan
+	
+	exec $0 $@
+
+fi
+

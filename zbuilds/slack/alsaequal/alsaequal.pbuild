@@ -1,0 +1,46 @@
+# alsaequal
+
+. ../func
+. ../build.conf
+
+URL=http://www.thedigitalmachine.net/tools/
+PKG=alsaequal
+VER=0.6
+COMP=tar.bz2
+DESC="Alsaequal is a real-time adjustable equalizer plugin for ALSA"
+DEPS=+alsa-lib,+caps
+CAT=BuildingBlock
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+build() {
+	# since not X compiling forget build triplet
+	mv ${PKG} ${PKG}-${VER}
+	cd ${PKG}-${VER}
+	make
+	[ "$?" -eq 0 ] || exit 1
+	cd -
+	install -d -m 0755 $PKG-install/usr/$LIBDIR/alsa-lib
+	install -m 0644 ${PKG}-${VER}/libasound_module_ctl_equal.so $PKG-install/usr/$LIBDIR/alsa-lib/
+	install -m 0644 ${PKG}-${VER}/libasound_module_pcm_equal.so $PKG-install/usr/$LIBDIR/alsa-lib/
+	install -d -m 0755 ${PKG}-install/usr/include
+	install -m 0644 ${PKG}-${VER}/ladspa.h ${PKG}-install/usr/include
+	install -m 0644 ${PKG}-${VER}/ladspa_utils.h ${PKG}-install/usr/include
+}
+	
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT

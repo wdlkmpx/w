@@ -1,0 +1,51 @@
+#!/bin/sh
+
+usage() {
+	echo "usage ${0##*/} <command> <directory>
+	
+command can be:
+	size
+	sizeliba
+	count"
+	exit 1
+}
+
+[ -z "$1" -o -z "$2" ] && usage
+[ -d "$2" ] || usage
+
+ZZFILE=/tmp/dirtree$$
+
+trap "rm -f $ZZFILE" EXIT
+
+DIR=$2
+
+case $1 in
+	size)
+		du -h --max-depth=1 $DIR | sort -h > ${ZZFILE}
+		less ${ZZFILE}
+		;;
+	sizeliba)
+		# static libs size
+		(
+		find $DIR -name '*.a' -type f | \
+		while read d ; do
+			echo -n "$d "
+			filesize -2 -v -k $d
+		done
+		) | sort --key=2,2 -V -r > ${ZZFILE}
+		less ${ZZFILE}
+		;;
+	count)
+		#count
+		(
+		find $DIR -mindepth 1 -maxdepth 1 -type d | while read d ; do
+			( echo -n "$d " ; find $d -type f -o -type l | wc -l )
+		done
+		) | sort --key=2,2 -V -r > ${ZZFILE}
+		less ${ZZFILE}
+		;;
+	*)
+		usage
+		;;
+esac
+

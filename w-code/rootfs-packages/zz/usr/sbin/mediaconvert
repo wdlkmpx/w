@@ -1,0 +1,411 @@
+#!/bin/sh
+#w__ 2014
+
+#set -x
+
+function help() {
+	echo "Syntax: 
+
+Converting using presets from config file:
+	${0##*/} [options] <preset> <file/dir>
+
+Extract audio zznet method:
+	${0##*/} [options] extractaudio <file/dir>
+	
+Other functions:
+	${0##*/} <action>
+
+[options] can be
+	-s : use input directory as output
+	-a : process all files where <file> is located
+	     (this is the same as using an input dir instead of a file)
+
+actions:
+	-h : show this help
+	-p : show presets from preset file
+	-c : edit with geany the preset file, config file and this script"
+	echo
+}
+
+DIRMODE=0
+
+CONFIGDIR=${HOME}/.config/mediaconvert
+CONFIGFILE=${CONFIGDIR}/config 
+[ ! -d "$CONFIGDIR" ] && mkdir -p $CONFIGDIR
+[ ! -f $CONFIGFILE ] && echo > $CONFIGFILE
+
+#* OPTIONS FROM CONFIG FILE
+#  $ALLFILESINDIR $OUTSAMEDIR $OUTPUTDIR $PRESET
+if [ -f "$CONFIGFILE" ] ; then
+	. $CONFIGFILE
+else
+	echo "ERROR: no config file: $CONFIGFILE"
+	exit 1
+fi
+
+export PRESETFILE=${CONFIGDIR}/presets
+[ ! -f $PRESETFILE ] && echo > $PRESETFILE
+
+if [ ! -f "$PRESETFILE" ] ; then
+	echo "ERROR: $PRESETFILE does not exist"
+	exit 1
+fi
+
+# Default options
+[ ! "$ALLFILESINDIR" ] && ALLFILESINDIR=0
+[ ! "$OUTSAMEDIR" ] && OUTSAMEDIR=0
+[ ! "$OUTPUTDIR" ] && OUTPUTDIR=$HOME
+
+# PARSE ARGUMENTS - override config and default options
+for i in $@ ; do
+	case $i in
+		-a)  ALLFILESINDIR=1; shift ;;
+		-s)  OUTSAMEDIR=1 ;  shift ;;
+		-p) 
+			cat $PRESETFILE | sed "/^#.*/d" ; echo 
+			[ "$DISPLAY" ] && geany $PRESETFILE &
+			exit ;;
+		-c)
+			[ ! -f $CONFIGFILE ] && echo > $CONFIGFILE
+			[ ! -f $PRESETFILE ] && echo > $PRESETFILE
+			[ "$DISPLAY" ] && geany $CONFIGFILE &
+			[ "$DISPLAY" ] && geany $PRESETFILE &
+			[ "$DISPLAY" ] && geany $0 &
+			exit ;;
+			
+		-h|-help|--help) help ; exit ;;
+	esac
+done
+
+function GetSecondsFromStr() {
+	# this is used for START TIME OFFSET and DURATION: -ss <start> -t duration
+	local hours minutes seconds
+	IFS=":" read hours minutes seconds <<< "$@"
+	if [ -z "$hours" -o -z "$minutes" -o -z "$seconds" ] ; then
+		return 1 #Invalid format
+	fi
+	hs=$((10#${hours} * 3600))
+	ms=$((10#${minutes} * 60))
+	#ss=$((hs + ms + seconds)) #bash treats these are octal numbers due to 0x
+	ss=$((10#${hs} + ${ms} + ${seconds})) #force decimal
+	echo "$ss"
+}
+
+# Determine preset
+PROC='convert'
+preset=$1 ; shift
+presetstr="$(grep -i "^${preset}=" $PRESETFILE)"
+if [ "$presetstr" ] ; then
+	echo "* Chosen preset: $presetstr"
+	presetname=${presetstr%%=*}
+	presetinfo=${presetstr#*=}
+	presetext=${presetinfo%%,*}
+	presetcmd=${presetinfo#*,}
+	acodec=${presetcmd}
+	if [ "$presetname" = "extractaudio" ] ; then
+		PROC='extractaudio'
+	fi
+	if [ "$presetname" = "extractsubs" ] ; then
+		PROC='extractsubs'
+	fi
+	secs=$(GetSecondsFromStr "$START")
+	if [ "$secs" ] && [ $secs -gt 0 ] ; then
+		start="-ss $secs"
+	fi
+	secs=$(GetSecondsFromStr "$DURATION")
+	if [ "$secs" ] && [ $secs -gt 0 ] ; then
+		duration="-t $secs"
+	fi
+	presetcmd="${presetcmd//\"<outfile>\"/$start $duration \"<outfile>\"}"
+	#echo $presetcmd ##DEBUG ; exit
+else
+	echo "* Invalid preset: $preset"
+	exit
+fi
+
+echo
+echo "PROC: $PROC"
+echo
+
+
+#* File/directory to process
+if [ "$1" ] ; then
+	infile="$(realpath "$@")"
+	infile="${infile%\/}"
+fi
+
+#* Parent directory
+parentdir=${infile%/*}
+outsame=$parentdir
+
+#* Determine the input type
+if [ -d "$infile" ] ; then
+	echo "* Directory mode"
+	TYPE='dir'
+	DIRMODE=1
+elif [ -f "$infile" ] ; then
+	echo "* File mode"
+	TYPE='file'
+	if [ $ALLFILESINDIR -eq 1  ] ; then
+		#get the dir
+		infile="${infile%/*}"
+		DIRMODE=1
+	fi
+else
+	echo "* Invalid file: $infile"
+fi
+
+#* Get the files to convert
+if [ $DIRMODE -eq 1 ] ; then
+	filelist="$(find "$infile" -maxdepth 1 -type f | sort -n)"
+else
+	filelist="$infile"
+fi
+
+#* Determine output directory
+if [ $OUTSAMEDIR -eq 1 ] ; then
+	outdir=${outsame}
+else
+	outdir=$OUTPUTDIR
+	if [ ! -d "$OUTPUTDIR" ] ; then
+		echo "* ERROR: Output dir from config file is invalid, using $HOME"
+		outdir=$HOME
+	fi
+fi
+
+#* Second pass to check if the in & output dirs are the same
+#  This will determine the presence of the -out prefix
+echo
+echo "Input dir: $parentdir"
+echo "Output dir: $outdir"
+if [ "$outdir" = "$parentdir" ] ;  then
+	OUTSAMEDIR=1
+	echo "* Input & output dirs are the same"
+fi
+
+#* Count file list
+x=0
+while read file ; do
+	[ ! "$file" ] && continue
+	let x++
+done <<< "$filelist"
+echo
+echo 'Files to process: '$x
+echo
+
+##################################
+OSARCH=$(uname -m)
+
+if which ffmpeg_static 1>/dev/null 2>&1 ; then
+	conv='ffmpeg_static'
+	probe='ffprobe_static'
+elif which ffmpeg-static 1>/dev/null 2>&1 ; then
+	conv='ffmpeg-static'
+	probe='ffprobe-static'
+elif which ffmpeg 1>/dev/null 2>&1 ; then
+	conv='ffmpeg'
+	probe='ffprobe'
+elif which avconv 1>/dev/null 2>&1 ; then
+	conv='avconv'
+	probe='avprobe'
+else
+	echo "* ERROR: could not find avconv and ffmpeg"
+	exit 1
+fi
+
+echo conv=${conv}
+echo probe=${probe}
+##################################
+
+scriptfile=/tmp/mediaconvert-${RANDOM}
+exitcodefile=/tmp/mediaconvert_exitcode_${RANDOM}
+echo -n "" > $scriptfile
+chmod +x $scriptfile
+
+rm -f /tmp/mediaconvert-abort
+
+y=0
+while read file
+do
+	[ ! "$file" ] && continue
+
+	if [ "$PROC" = "convert" ] ; then
+
+		#==============================================
+		#              CONVERT
+		#==============================================
+
+		outfile=${file##*/}   #remove path
+		outfile=${outfile%.*} #remove extension
+		[ $OUTSAMEDIR -eq 1 ] && outfile=${outfile}-out
+		if [ "$OVERRIDEEXTENSION" ] ; then 
+			#this variable is exported by the calling script (mediaconvert-gui)
+			outfile=${outdir}/${outfile}.${OVERRIDEEXTENSION}
+		elif [ "$presetext" = 'copy' ] ; then #'copy' preset
+			fileext=${file##*.}
+			outfile=${outdir}/${outfile}.${fileext##*.}
+		else
+			outfile=${outdir}/${outfile}.${presetext}
+		fi
+
+		cmdstr=${presetcmd//<infile>/${file}}
+		cmdstr=${cmdstr//<outfile>/${outfile}}
+		cmdstr="$conv $cmdstr"
+		echo $cmdstr ##DEBUG
+		#exit
+		let y++
+
+		echo -n 'Processing: '${file##*/}
+		cat > $scriptfile <<EOF
+#!/bin/sh
+echo
+echo '#' $cmdstr
+echo
+$cmdstr
+ec=\$?
+echo -n \$ec > $exitcodefile
+#if exit code is 255, we assume that it has been aborted manually
+if [ \$ec -eq 255 ] ; then 
+	echo 
+	echo 'You have aborted the operation'
+	echo -n 'Do you want to cancel everything? [y/N]: '
+	read abort
+	if [[ \${abort,,} == y ]] ; then
+		echo 'yes' > /tmp/mediaconvert-abort
+	fi
+elif [ \$ec -ne 0 ] ; then 
+	echo echo
+	echo 'Exit code :'\$ec
+	echo 'THE WAS AN ERROR' ; read aa
+fi
+DEBUG=$DEBUG
+if [ "\$DEBUG" = "1" ] ; then
+	echo ; echo ; echo -n 'DEBUG MODE' ; read
+fi
+EOF
+	
+		xterm -geometry 110x37 -title "(${y}/${x}) ${file##*/} [${presetname}]" -e $scriptfile 
+		
+	elif [ "$PROC" = "extractaudio" ] || [ "$PROC" = "extractsubs" ] ; then
+
+		#==============================================
+		#            EXTRACT AUDIO
+		#==============================================
+
+		outfile=${file##*/}   #remove path
+		outfile=${outfile%.*} #remove extension
+		outfile=${outdir}/${outfile} #.${presetext}
+		
+		let y++
+		echo -n 'Processing: '${file##*/}
+		
+		while read line
+		do
+			#  $1    $2         $3    $4
+			#Stream #0.0:      Video: h264 (High), yuv420p, 800x450 [PAR 1:1 DAR 16:9], 29.97 fps, 29.97 tbr, 29.97 tbn, 59.94 tbc
+			#Stream #0.1:      Audio: ac3, 48000 Hz, stereo, s16, 192 kb/s
+			#Stream #0:1(eng): Audio: aac (LC) (mp4a / 0x6134706D), 12000 Hz, stereo, fltp, 64 kb/s (default)
+			read descx streamx typex codecx F5 <<< "$line"
+			#echo -e "descx=${descx}\nstreamx=${streamx}\ntypex=${typex}\ncodecx=${codecx}\n"
+			if [ "$descx" != "Stream" ] ; then
+				continue #only Stream
+			fi
+			#==
+			if [ "$PROC" = "extractaudio" ] ; then
+				if [ "$typex" != "Audio:" ] ; then
+					continue #only Audio
+				fi
+			fi
+			if [ "$PROC" = "extractsubs" ] ; then
+				if [ "$typex" != "Subtitle:" ] ; then
+					continue #only Audio
+				fi
+			fi
+			#==
+			#echo $streamx | sed 's/:$// ; s/(.*// ; s/\./:/g ; s/#//'
+			#echo "$line" 
+			snumber=${streamx%:}	# #0:1(eng): -> #0:1(eng)
+			snumber=${snumber%%(*}	# #0:1(eng)  -> #0.1
+			smap=${snumber/\#}  	# #0.1   -> 0.1
+			smap=${smap/./:}		# 0.1    -> 0:1
+			smap=${smap:0:3}		# 0:1
+			snumber="#${smap//:/.}"
+			codecx=${codecx%,}		# ac3,	 -> ac3
+			# We check only codecs but not input types
+			# In some cases we must choose an appropiate extension
+			# that will be recognized and handled properly by $conv
+			case $codecx in
+				pcm*)   file_ext='wav' ;; #audio
+				subrip) file_ext='srt' ;; #subtitle
+				dvd_subtitle) continue ;; #ffmpeg cannot mux dvd_subtitles
+				*) file_ext=$codecx ;;
+			esac
+			cmdstr="$conv -i \"$file\" -y -map \"$smap\" $acodec copy $start $duration \"${outfile}_${snumber}.${file_ext}\""
+			cat > $scriptfile <<EOF
+#!/bin/sh
+echo
+echo '#' $cmdstr
+echo
+$cmdstr
+ec=\$?
+echo -n \$ec > $exitcodefile
+#if exit code is 255, we assume that it has been aborted manually
+if [ \$ec -eq 255 ] ; then 
+	echo 
+	echo 'You have aborted the operation'
+	echo -n 'Do you want to cancel everything? [y/N]: '
+	read abort
+	if [[ \${abort,,} == y ]] ; then
+		echo 'yes' > /tmp/mediaconvert-abort
+	fi
+elif [ \$ec -ne 0 ] ; then 
+	echo echo
+	echo 'Exit code :'\$ec
+	echo 'THE WAS AN ERROR' ; read aa
+fi
+DEBUG=$DEBUG
+if [ "\$DEBUG" = "1" ] ; then
+	echo ; echo ; echo -n 'DEBUG MODE' ; read
+fi
+EOF
+			xterm -geometry 110x37 -title "(${y}/${x}) ${file##*/} [extractaudio]" -e $scriptfile 
+		done <<< "$($probe "$infile" 2>&1)"
+
+	fi
+
+	#------
+
+	exitcode=$(cat $exitcodefile 2>/dev/null)
+	if [ "$exitcode" != "0" ] ; then
+		case $exitcode in
+			"255") echo "  ... [operation cancelled by user]" ;;
+			*) echo "  ... [ERROR]" ;;
+		esac
+	else
+		echo "  ... [OK]"
+	fi
+
+	if [ -f /tmp/mediaconvert-abort ] ; then
+		echo
+		echo "* Found abort signal, exiting..."
+		aborted="1"
+		break
+	fi
+
+done <<< "$filelist"
+
+##########################################################
+
+# Cleanup
+echo
+echo "* Done"
+
+rm -f $scriptfile
+rm -f $exitcodefile
+rm -f /tmp/mediaconvert-abort
+
+if [ "$aborted" ] ; then
+	exit 255
+fi
+
+### END ###

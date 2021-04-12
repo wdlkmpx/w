@@ -1,0 +1,125 @@
+#!/bin/bash
+# Load modules that provide interfaces used by specialized tools
+
+# currently not enabled
+function cpu_temp_modules() {
+	local action=$1 #load unload
+	ls /lib/modules/$(uname -r)/kernel/drivers/hwmon/*temp* | \
+		sed -e 's|.*/||' -e 's|.ko||' | \
+		while read mod ; do
+			if [ "$action" = "load" ] ; then
+				echo "Loading module: $mod"
+				modprobe -v $mod &>/dev/null
+			else
+				echo "Unloading module: $mod"
+				modprobe -r $mod &>/dev/null
+			fi
+		done
+}
+
+# currently not enabled
+function brand_modules() {
+	local action=$1 #load unload
+	local brand
+	## -t 2 = based board information
+	dmid=$(dmidecode -t 2)
+	echo "$dmid" | grep -qi toshiba && brand='toshiba'
+	if [ "$brand" ] ; then
+		find /lib/modules/$(uname -r) -name '*'$brand'*' | grep '\.ko' | \
+			sed -e 's|.*/||' -e 's|.ko||' | \
+			while read mod ; do
+				if [ "$action" = "load" ] ; then
+					echo "Loading module: $mod"
+					modprobe -v $mod &>/dev/null
+				else
+					echo "Unloading module: $mod"
+					modprobe -r $mod &>/dev/null
+				fi
+			done
+	fi
+}
+
+# currently not enabled
+function i2c_brand_modules() {
+	local action=$1
+	local brand=$(LANG=C lspci | grep -i 'ISA bridge' | cut -d' ' -f4)
+	if [ "$brand" ] ; then
+		brand=${brand,,} #lowercase
+		find /lib/modules/$(uname -r) -name '*.ko' | \
+			grep -E 'i2c|hwmon' | grep $brand | \
+			sed -e 's|.*/||' -e 's|.ko||' | \
+			while read mod ; do
+				if [ "$action" = "load" ] ; then
+					echo "Loading module: $mod"
+					modprobe -v $mod &>/dev/null
+				else
+					echo "Unloading module: $mod"
+					modprobe -r $mod &>/dev/null
+				fi
+			done
+	fi
+}
+
+function load_module() {
+	echo "Loading $1"
+	modprobe $1
+}
+
+###############################################################
+
+function start() {
+
+	## sensors
+	load_module hwmon
+	load_module acpi_power_meter
+	load_module i2c-dev
+	#load_module it87
+
+	## msr cpuid
+	load_module cpuid
+	load_module msr
+	mkdir -p /dev/cpu
+	for i in 0 1 2 3 4 5 6 7
+	do
+		[ ! -e /dev/cpu/$i ] && mkdir /dev/cpu/$i
+		cd /dev/cpu/$i
+		[ ! -e cpuid ] && mknod cpuid c 203 $i
+		[ ! -e msr ] && mknod msr c 202 $i
+	done
+
+	## decode-dimms
+	load_module eeprom
+	load_module at24
+
+	#brand_modules load
+	#i2c_brand_modules load
+	#cpu_temp_modules load
+}
+
+function stop() {
+	## sensors
+	modprobe -rv it87
+	modprobe -rv i2c-dev
+
+	## msr cpuid
+	modprobe -rv msr
+	modprobe -rv cpuid
+
+	## decode-dimms
+	modprobe -rv eeprom
+	modprobe -rv at24
+
+	##
+	#brand_modules unload
+	#i2c_brand_modules unload
+	#cpu_temp_modules unload
+}
+
+###############################################################
+
+case $1 in
+	start|restart) start ;;
+	stop) stop ;;
+esac
+
+### END ###

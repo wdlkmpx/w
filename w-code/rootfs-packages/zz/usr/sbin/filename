@@ -1,0 +1,89 @@
+#!/bin/sh
+
+help() {
+	script=${0##*/}
+	echo "
+$script - rename files or files following some simple rules
+
+syntax:
+  $script <command [arg]> file/dir
+
+commands:
+  s2u - convert spaces to underscore
+  u2s - convert underscores to spaces
+  prefix <prefix>  : add <prefix>
+  prefixr <prefix> : remove <prefix>
+  suffix <suffix>  : add <suffix>
+  suffixr <suffix> : remove <suffix>
+  list: 
+        001 - name.mp3
+        002 - name.mp3
+        .....
+        XXX - name.mp3
+  listr             : remove list
+"
+	exit
+}
+
+case $1 in
+	s2u) OPT=space2underscore ; ARG=zz ; shift ;;
+	u2s) OPT=underscore2space ; ARG=zz ; shift ;;
+	prefix) OPT=prefix ; ARG=$2 ; shift 2 ;;
+	prefixr) OPT=prefixremove ; ARG=$2 ; shift 2 ;;
+	suffix) OPT=suffix ; ARG=$2 ; shift 2 ;;
+	suffixr) OPT=suffixremove ; ARG=$2 ; shift 2 ;;
+	list) OPT=list ; ARG=zz ; shift ;;
+	listr) OPT=listremove ; ARG=zz ; shift ;;
+	*) help ;;
+esac
+
+x=1
+
+rename() {
+	file="$1"
+	dir=$(dirname "$1")
+	basename=$(basename "$1")
+	case $OPT in
+		space2underscore) newfile="${file// /_}" ;;
+		underscore2space) newfile="${file//_/ }" ;;
+		prefix) newfile="${dir}/${ARG}${basename}" ;;
+		prefixremove) newfile="${dir}/${basename#${ARG}}" ;;
+		suffix) newfile="${dir}/${basename}${ARG}" ;;
+		suffixremove) newfile="${dir}/${basename%${ARG}}" ;;
+		list)
+			if [ $x -lt 10  ] ; then
+				y="00${x}"
+			elif [ $x -lt 100  ] ; then
+				y="0${x}"
+			else
+				y="$x"
+			fi
+			newfile="${dir}/${y} - $basename"
+			x=$((x+1))
+			;;
+		listremove)
+			newfile="${file//[0-9][0-9][0-9] - }"
+			if [ "$file" = "$newfile" ] ; then
+				newfile="${file//[0-9][0-9] - }"
+			fi
+			;;
+	esac
+	if [ "$file" != "$newfile" ] ; then
+		mv -fv "$file" "$newfile"
+		sync
+	fi
+}
+
+if [ -f "$1"  ] ; then
+	rename "$1"
+	exit
+fi
+
+dir="$1"
+find "$dir" -type f | sort | \
+while read f
+do
+	rename "$f"
+done
+
+### END ###

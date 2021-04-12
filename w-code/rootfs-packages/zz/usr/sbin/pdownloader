@@ -1,0 +1,366 @@
+#!/bin/bash
+# deps: wget curl megatools dl
+
+set -x
+
+function ahelp() {
+	script=${0##*/}
+	echo -e "\n* Syntax:\n
+	$script [url] 	(graphical mode, can de used to configure)	
+	$script -auto <v_url> (unattended mode, can be used by other scripts)
+	$script -reset	(reset config)
+	$script -last (reuse last stored URL)
+	$script -queue|-batch|-list (GUI to add a link list to download)"
+	exit $1
+}
+case $1 in -h|-help|--help) ahelp ;; esac
+
+#======================================================================
+
+export useragent='Mozilla/5.0 (Windows NT 6.3; rv:36.0) Gecko/20150101 Firefox/36.0'
+export configdir=${HOME}/.config/pdownloader
+
+AUTO=0 ; RESET=0  ;	TRAY=1	; TRAYONLY=0
+
+#grab last stored url
+function LastURL() {
+	if [ -f "$configdir/lasturl" ] ; then
+		read -r LASTURL < "$configdir/lasturl"
+		echo "$LASTURL"
+	fi	
+}
+
+#======================================================================
+
+#parse arguments
+while true; do
+	case $1 in
+		-|-stdin)   STDIN=1 	 ;  shift ;;
+		-auto)		AUTO=1 		 ;	shift ;;
+		-reset) 	RESET=1 	 ;	shift ;;
+		-trayonly)	TRAYONLY=1	 ; 	shift ;;
+		-notray) 	TRAY=0 		 ;	shift ;;
+		-last|last)	LAST=1 		 ; 	shift ;;
+		-zzzlist) 	ZLIST=1 	 ; 	shift ;;
+		-dir|dir) rox $configdir ; exit ;;
+		-log|log) geany $configdir/zlog ; exit ;;
+		-queue|-batch|-list) geany "$configdir/zlist" ; exit ;;
+		-here|here) #this is meant to be command line only
+			CURDIR=${PWD}
+			HERE=1 
+			HEREMSG="-here (will download to current dir)"
+			shift 
+			;;
+		*) break ;;
+	esac
+done
+#echo "$@"
+
+if [ "$ZLIST" ] ; then
+	if [ -f "$configdir/.stop" ] ; then
+		echo " Stopping downloads"
+		rm -f "$configdir/.stop"
+		exit
+	fi
+fi
+
+if [ $RESET -eq 1 ]; then 
+	[ -e "$configdir" ] && rm -rf $configdir
+	echo "${0}: Config reset"
+	exit 
+fi
+
+#======================================================================
+#							TRAY ICON
+#======================================================================
+
+if [ $TRAY -eq 1  ]; then
+	ydt=$(busybox ps | grep "\-\-command=pdownloader" - | grep -v grep)
+	if [ "$ydt" = "" ]; then
+		yad --notification --command=pdownloader \
+			--image=/usr/share/pixmaps/pdownloader.png &
+	else
+		echo -e "Tray ICON is already active\n$ydt"
+	fi
+	[ $TRAYONLY -eq 1 ] && echo "TRAYONLY is enabled" && exit
+fi
+
+#======================================================================
+#						default values
+#======================================================================
+
+export configfile_dir=${configdir}/savedir
+export configfile=${configdir}/config
+configfile_dspeed=${configdir}/downspeed
+
+[ -f "$configfile" ] && . ${configfile}
+[ -f "$configfile_dspeed" ] && read -r DOWNLOADSPEED < $configfile_dspeed
+[ ! "$DOWNLOAD_DIR" ] && DOWNLOAD_DIR="$HOME" ##default
+[ ! "$DOWNLOADLIMIT" ] && DOWNLOADLIMIT="FALSE" ##default
+[ ! "$DOWNLOADSPEED" ] && DOWNLOADSPEED="50" ##default
+[ ! "$LOGURL" ] && LOGURL="FALSE" ##default
+[ ! "$DL_PROGRAM" ] && DL_PROGRAM="wget" ##default
+
+execombo="wget!curl"
+execombo=${execombo//$DL_PROGRAM/^${DL_PROGRAM}}
+
+#======================================================================
+#							LOCK
+#======================================================================
+
+if [ -e "${configdir}/.lock" ] && [ ! "$ZLIST" ] ; then
+	if [ -f "${configdir}/zlist" ] ; then
+		yad --title="In batch mode" --center --image=gtk-dialog-error \
+			--text="Sorry, pdownloader now is in batch mode, please wait until the last link is processed..." \
+			--button="Show main dialog:0" \
+			--button="Force remove lock:1" \
+			--button="Pause after current download:2" \
+			--window-icon=/usr/share/pixmaps/pdownloader.png
+		case $? in
+			0) 	DIALOGONLY='TRUE' ; DL_URL="ZZZ" ;;
+			1)  rm -f ${configdir}/.lock ; exit ;;
+			2)	touch $configdir/.stop ; exit ;;
+			*)	exit ;;
+		esac
+	else
+		echo "Deleting ${configdir}/.lock"
+		rm -f "${configdir}/.lock"
+	fi
+fi
+
+#======================================================================
+
+if [ ! "$DIALOGONLY" ] ; then
+
+  if [ "$LAST" ] ; then
+	DL_URL=$(LastURL)
+	[ ! "$DL_URL" ] && echo "ERROR: no input url" && exit 1
+	[ "$LASTURL" ] && echo "* pdownloader: will use $LASTURL"
+  else
+	DL_URL="$@"
+  fi
+
+  ##### through a text file containing URLs
+  if [ -f "$DL_URL" ] ; then
+	mkdir -p "$configdir"
+	if [ "$DISPLAY" ] ; then
+		yad --title "pdownloader" --text=" ${DL_URL##*/} \n\n Is this a text file containing URLs? If so, would like to add them to the download queue?" \
+			--button=gtk-yes:0 --button=gtk-no:1 --center --window-icon=/usr/share/pixmaps/pdownloader.png
+		if [ $? -eq 0 ] ; then
+			cat "$DL_URL" >> "${configdir}/zlist"
+			pdownloader &
+		fi
+		exit 0
+	fi
+  fi
+
+  #check for queue
+  if [ ! "$DL_URL" ] && [ -f "${configdir}/zlist" ] ; then
+	DL_URL=$(LastURL) #check for the last unfinished download
+	[ "$DL_URL" ] && UNFINISHED=1
+	[ ! "$DL_URL" ] && read -r DL_URL < ${configdir}/zlist #read first line
+	if [ "$DL_URL" ] ; then
+		[ ! "$UNFINISHED" ] && sed -i '1d' ${configdir}/zlist #delete first line
+		QUEUE=1
+		QUEUESTR='pdownloader -zzzlist'
+		QUEUEWAIT='5' #sleep 5
+		AUTO=1
+	else 
+		rm -f ${configdir}/zlist
+		rm -f ${configdir}/.lock
+	fi			
+  fi
+  [ "$QUEUE" ] && touch ${configdir}/.lock
+
+fi
+
+#======================================================================
+#							DIALOG
+#======================================================================
+
+[ "$DL_URL" = "" ] && [ "$ZLIST" ] && exit 1
+[ "$DIALOGONLY" ] && DL_URL="" && zLBL=":LBL"
+
+[ ! "$DISPLAY" ] && AUTO=1
+[ ! -d "$configdir" ] && mkdir -p "$configdir"
+	
+if [ $AUTO -eq 1 ]; then 
+	[ "$DL_URL" = "" ] && echo "$0 ERROR: no url specified" && exit 1
+else
+	DIALOGX=1
+	if [ ! "$DIALOGONLY" ] ; then
+	  if [ "$DL_URL" = "" ]; then
+		DL_URL="$(xclip -selection clipboard -o)"
+		case $DL_URL in
+			http://*|https://*|www.*) isok=1;;
+			*.com/*|*.net/*|*.be/*) isok=1;;
+			search?*) isok=1;;
+			*) isok=0 ;;
+		esac
+		[ $isok -eq 0 ] && DL_URL=""
+	  fi
+	fi
+
+	#width='--width=400'
+	dialog_result=$(yad --title="pdownloader $HEREMSG" $width \
+		--center --fixed --borders="4" --columns="1" --buttons-layout="center" \
+		--window-icon=/usr/share/pixmaps/pdownloader.png \
+		--separator="\n" --form \
+		--field="URL${zLBL}" "$DL_URL" \
+		--field="DIR:DIR" "$DOWNLOAD_DIR" \
+		--field="Open Download Directory:btn" "rox %2" \
+		--field="exe:CB" "$execombo" \
+		--field="Limit download speed::CHK" "$DOWNLOADLIMIT" \
+		--field="KB" "$DOWNLOADSPEED" \
+		--field="Log URLs:CHK" "$LOGURL" \
+		--button=gtk-ok:0 \
+		--button=gtk-cancel:1 \
+		--button="Batch...:geany $configdir/zlist" \
+		--button="View Log:geany $configdir/zlog.ok $configdir/zlog.err" )
+	
+	[ $? -ne 0 ] || [ "$dialog_result" = "" ] && echo "User cancelled operation" && exit 2
+
+	x=1
+	while read fieldvalue; do
+		[ $x -eq 1 ] && DL_URL="$fieldvalue"
+		[ $x -eq 2 ] && DOWNLOAD_DIR="$fieldvalue"
+		[ $x -eq 4 ] && DL_PROGRAM="$fieldvalue"
+		[ $x -eq 5 ] && DOWNLOADLIMIT="$fieldvalue"
+		[ $x -eq 6 ] && DOWNLOADSPEED="$fieldvalue" #in KB
+		[ $x -eq 7 ] && LOGURL="$fieldvalue" 
+		let x++
+	done <<< "$dialog_result" #use this method instead of a pipe (problem with variables)
+	
+	[ ! -d "$configdir" ] && rm -f $configdir && mkdir -p $configdir
+
+	echo "DOWNLOAD_DIR=\"$DOWNLOAD_DIR\"
+DL_PROGRAM=\"$DL_PROGRAM\"
+DOWNLOADLIMIT=\"$DOWNLOADLIMIT\"
+LOGURL=\"$LOGURL\"
+" > ${configfile}
+fi
+
+#======================================================================
+
+#####/ test if variable is a number
+case "$DOWNLOADSPEED" in 
+	"0") true ;; #0. no download limit
+	''|*[!0-9]*) true ;; #invalid number, no download limit
+	*) ITSNUMBER=1 ;; #valid number
+esac
+if [ "$ITSNUMBER" ] ; then
+	[ "$DIALOGX" ] && echo "$DOWNLOADSPEED" > ${configfile_dspeed}
+	LIMITBYTES=$((DOWNLOADSPEED * 1024))
+else
+	echo "Download speed: $DOWNLOADSPEED not valid"
+	DOWNLOADLIMIT='FALSE'
+fi
+
+#########################
+[ "$DIALOGONLY" ] && exit 
+#########################
+
+## check for queue again
+if [ ! "$DL_URL" ] ; then
+	if [ -f ${configdir}/zlist ] ; then
+		read -r DL_URL < ${configdir}/zlist #read first line
+		if [ "$DL_URL" ] ; then
+			echo "$0 : found an URL in ${configdir}/zlist"
+			$0 &
+			exit 
+		fi
+	fi
+	echo "$0 ERROR: no url specified" 
+	exit 1 
+fi
+
+#======================================================================
+#check for -last setting
+case $DL_URL in
+	*/*) true;; #http://*|https://*|www.*|*/*) true;;
+	last|-last) 
+		DL_URL=$(LastURL) 
+		[ ! "$DL_URL" ] && echo "ERROR: no input url" && exit 1
+		[ "$LASTURL" ] && echo "* pdownloader: will use $LASTURL"
+		;;
+esac
+#======================================================================
+
+[ "$LOGURL" = 'TRUE' ] && echo -n "$DL_URL" > $configdir/lasturl #record last url for future reference.
+[ ! "$QUEUEWAIT" ] && QUEUEWAIT=1
+
+DL_URL=${DL_URL%?get} #ftp
+case ${DL_URL} in
+	*mega.co.nz*) DL_PROGRAM='megatools dl' ;;
+	*mega.nz*) DL_PROGRAM='megatools dl' ;;
+esac
+
+SCRIPTFILE="/tmp/pdownloader_${RANDOM}.sh"
+
+if [ "$DL_PROGRAM" = 'wget' ] ; then
+	[ "$DOWNLOADLIMIT" = "TRUE" ] && LIMITSTR="--limit-rate=${LIMITBYTES}"
+	EXECCOMMAND="wget $LIMITSTR -c --no-check-certificate --user-agent=\"$useragent\" \"$DL_URL\""
+elif [ "$DL_PROGRAM" = 'curl' ] ; then
+	[ "$DOWNLOADLIMIT" = "TRUE" ] && LIMITSTR="--limit-rate ${LIMITBYTES}"
+	SAVETOFILE=${DL_URL##*/} #basename
+	EXECCOMMAND="curl -o \"${SAVETOFILE}\" -A \"$useragent\" -L $LIMITSTR \"${DL_URL}\""
+fi
+
+####
+[ "$HERE" ] && DOWNLOAD_DIR=${CURDIR}
+####
+	
+if [ $AUTO -eq 1 ] && [ ! "$DISPLAY" ] ; then ##auto
+	echo "URL: $DL_URL"
+	echo "Dir: ${DOWNLOAD_DIR}"
+	echo
+	echo ${EXECCOMMAND}
+	echo
+	eval ${EXECCOMMAND}
+	exitcode=$?
+	echo -e "\nExit code: $exitcode"
+	
+else ##from dialog## - AUTO WITH X
+	echo $EXECCOMMAND
+	echo "#!/bin/sh
+cd \"$DOWNLOAD_DIR\"
+LOGURL=\"$LOGURL\"
+function cleanup() { 
+	rm -f $SCRIPTFILE ${SCRIPTFILE}.log
+}
+trap \"cleanup\" INT TERM EXIT KILL
+for (( x=1 ; x<=$QUEUEWAIT ; x++ )) ; do echo -n \"\$x \" ; sleep 1 ; done
+echo
+echo \"URL: $DL_URL\"
+echo \"Dir: ${DOWNLOAD_DIR}\"
+echo
+echo ${EXECCOMMAND}
+echo
+$EXECCOMMAND 2>&1 | tee ${SCRIPTFILE}.log
+exitcode=\$?
+if [ \$exitcode -ne 0 ] || grep -q 'ERROR' ${SCRIPTFILE}.log ; then
+	[ \"\$LOGURL\" = 'TRUE' ] && echo \"$DL_URL\" >> $configdir/zlog.err
+	echo ; echo \"Exit code: \$exitcode\"
+	echo 'Type A and hit enter to remove '${configdir}/zlist
+	echo 'Type P and hit enter to stop downloads'
+	echo 'THERE WAS AN ERROR. PRESS ENTER KEY TO CLOSE THIS WINDOW '
+	read -t 10 var #read -t 30 var (tiemout)
+	case \$var in 
+		a|A) rm -f ${configdir}/zlist ;; 
+		p|P) touch $configdir/.stop ; rm $configdir/.lock ;;
+	esac
+	$QUEUESTR
+else
+	[ \"\$LOGURL\" = 'TRUE' ] && echo \"$DL_URL\" >> $configdir/zlog.ok
+	rm -f $configdir/lasturl #successful download, do no record as last url
+	$QUEUESTR
+	$CHECKFSTR
+fi
+cleanup 
+exit \$exitcode
+" > $SCRIPTFILE
+	chmod +x $SCRIPTFILE
+	lxterminal --title="pdownloader $DL_URL" -e $SCRIPTFILE
+fi
+
+### END ###

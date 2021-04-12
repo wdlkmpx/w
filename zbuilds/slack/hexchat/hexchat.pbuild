@@ -1,0 +1,65 @@
+# hexchat
+
+. ../func
+. ../build.conf
+
+URL=https://dl.hexchat.net/hexchat
+PKG=hexchat
+VER=2.12.4 # 2016-dec-10 
+COMP=tar.xz
+DESC="Graphical IRC chat client"
+DEPS=+gtk+,+openssl,+perl
+CAT=Internet
+DESKTOP=hexchat.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+patch_me() {
+	for i in *.patch; do 
+		echo "applying $i"
+		patch -p0 --verbose < $i
+	done
+}
+
+build() {
+	cd ${PKG}-${VER}
+	./configure --prefix=/usr \
+				--localstatedir=/var \
+				--sysconfdir=/etc \
+				--libdir=/usr/${LIBDIR} \
+				--disable-python
+	[ "$?" -eq 0 ] || exit
+	make $MKFLG
+	[ "$?" -eq 0 ] || exit
+	make DESTDIR=$CWD/${PKG}-install install
+	cd -
+}
+	
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+#patch_me
+
+# defaultbrowser
+sed -i 's|firefox -new-window|defaultbrowser|' ${PKG}-${VER}/src/common/hexchat.c
+sed -i 's|Firefox|defaultbrowser|' ${PKG}-${VER}/src/common/hexchat.c
+
+# fix root warning
+sed -i 's|getuid|getpid|' ${PKG}-${VER}/src/common/hexchat.c
+
+# ...
+mkdir -p /usr/local/include
+
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

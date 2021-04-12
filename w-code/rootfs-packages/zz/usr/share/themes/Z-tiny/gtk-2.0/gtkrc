@@ -1,0 +1,88 @@
+#
+# This theme is the default theme if no other theme is selected.
+#
+# -- https://developer.gnome.org/gtk2/2.24/GtkSettings.html#GtkSettings--color-hash
+gtk-cursor-blink = 0
+gtk-enable-accels = 0
+gtk-enable-animations = 0
+gtk-enable-mnemonics = 0
+gtk-menu-images = 0
+gtk-can-change-accels = 0
+gtk-button-images = 0
+gtk-enable-tooltips = 0
+#gtk-icon-theme-name = "hicolor"
+gtk-color-palette = { black:white:gray50:red:purple:blue:light blue:green:yellow:orange:lavender:brown:goldenrod4:dodger blue:pink:light green:gray10:gray30:gray75:gray90 }
+
+
+# gtkrc default theme
+
+style "Z"
+{
+
+# for gtk2...
+font_name="DejaVu Sans 5"
+
+### Some misc settings ###
+
+
+##This option is used in many places to determine padding between text and border of widgets. For details see the geometry documentation of the specific widgets.
+#       xthickness = 3
+#       ythickness = 3
+
+
+GtkToolbar::tooltips = 0
+#{ icons, text, both, bothhoriz }
+#GtkToolbar::toolbar-style = { 0, 1, 0, 1 }
+
+#GtkWidget::interior_focus         = 0
+#GtkWidget::focus_padding          = 0
+#GtkButton::default_border         = { 0, 0, 0, 0 }
+#GtkButton::default_outside_border = { 0, 0, 0, 0 }
+#GtkButton::inner_border = { 0, 0, 0, 0 }
+#GtkRange::trough_border           = 0
+GtkRange::slider_width            = 10
+GtkRange::stepper_size            = 10
+GtkRange::slider-width            = 10
+GtkRange::trough-under-steppers   = 0
+GtkPaned::handle_size             = 6
+#GtkScrollbar::min_slider_length   = 30
+GtkCheckButton::indicator_size    = 10
+#GtkMenuBar::internal_padding      = 0
+#GtkOptionMenu::indicator_size     = { 12, 8 }
+#GtkOptionMenu::indicator_spacing  = { 0, 4, 0, 0 }
+GtkButtonBox::child-min-height = 10
+GtkButtonBox::child-min-width = 10
+GtkButtonBox::child-internal-pad-x = 0
+GtkButtonBox::child-internal-pad-y = 0
+
+### The theme colors ###
+
+#ExoIconBar::active-item-border-color = "#98bde2"
+#ExoIconBar::active-item-fill-color   = "#98bde2"
+#ExoIconBar::active-item-text-color   = "#000000"
+#ExoIconBar::cursor-item-border-color = "#d8d8d8"
+#ExoIconBar::cursor-item-fill-color   = "#d8d8d8"
+#ExoIconBar::cursor-item-text-color   = "#000000"
+
+
+#fg[NORMAL]              = "#000000"
+#fg[ACTIVE]              = "#000000"
+#fg[INSENSITIVE]         = "#6f6f6f"
+#fg[PRELIGHT]            = "#0f2047"
+#fg[SELECTED]            = "#ffffff"
+
+#bg[ACTIVE]              = "#ededed"
+#bg[NORMAL]              = "#e3e7ec"
+#bg[INSENSITIVE]         = "#ededed"
+#bg[PRELIGHT]            = "#ededed"
+#bg[SELECTED]            = "#6b7d9a"
+
+#base[NORMAL]            = "#ffffff"
+#base[ACTIVE]            = "#637593"
+#base[INSENSITIVE]       = "#ffffff"
+#base[PRELIGHT]          = "#ededed"
+#base[SELECTED]          = "#637593"
+
+}
+
+class "GtkWidget" style "Z"

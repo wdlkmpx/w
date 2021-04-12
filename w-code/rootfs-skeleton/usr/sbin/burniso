@@ -1,0 +1,661 @@
+#!/bin/bash
+#- Deps
+#	bash 4+, yad 25+, probedisk, /usr/sbin/filesize (zz script)
+#	cdrtools 2015+ (http://sourceforge.net/projects/cdrtools/files/)
+#   dvd+rw-tools - growisofs (burn directory)
+
+#set -x
+
+#CD, DVD and Blu‐ray Disc Burning Speeds
+#          WRITE SPEED
+#Burn    CD    DVD     BD
+#Rate  (Mb/s) (Mb/s) (Mb/s)
+#1x     0.15   1.32    4.5
+#2x     0.30   2.64    9
+#4x     0.60   5.28    18
+#6x     0.90   7.92    27
+#8x     1.2    10.56   36
+#10x    1.5    13.2    
+#12x    1.8    15.84   
+#14x    2.1    18.48   
+#16x    2.4    21.12   
+#18x    2.7    23.76   
+#20x    3.0    26.4    
+#22x    3.3    29.04   
+#24x    3.6    31.68   
+#32x    4.8
+#40x    6.0
+#48x    7.2
+#52x    7.8
+
+GUI=
+[ "$DISPLAY" ] && GUI=1
+
+usage() {
+	echo usage
+	exit
+}
+
+i=0
+t=$#
+while [ $i -le $t ]
+do
+	case $1 in
+		log|-log) geany /tmp/burniso.log ; exit ;;
+		-cd|cd)   MEDIA_TYPE='CD'  ;;
+		-dvd|dvd) MEDIA_TYPE='DVD' ;;
+		-bd|bd)   MEDIA_TYPE='BD'  ;;
+		-fake)    FAKE_DRV=1 ;;
+		-cli)     GUI=  ;;
+		-gui)     GUI=1 ;;
+		*) break ;;
+	esac
+	i=$((i+1))
+	shift
+done
+ISOFILE="$1"
+
+echo -n > /tmp/burniso.log
+function LOG() {
+	echo -e "$@"
+	echo -e "$@" >> /tmp/burniso.log
+}
+export -f LOG
+
+# Files
+BURNISOIMAGE=/usr/share/pixmaps/puppy/cd_burn.svg
+CDIMAGE=/usr/share/pixmaps/puppy/cdrom.svg
+DVDIMAGE=/usr/share/pixmaps/puppy/cdrom.svg
+DVDVIDEOIMG=/usr/share/pixmaps/puppy/video.svg
+BDIMAGE=/usr/share/pixmaps/puppy/cdrom.svg
+BURNISOICON="--window-icon=${BURNISOIMAGE}"
+
+exit_error() {
+	LOG "burniso error:\n$@"
+	if [ "$GUI" ] ; then
+		yad --center --title="burniso error" --text="$@" --image=dialog-error --button=gtk-ok:0 ${BURNISOICON}
+	fi
+	exit 1
+}
+
+# cdrecord
+CDRECORD='cdrecord'
+if ! which ${CDRECORD} &>/dev/null ; then
+	exit_error "  Need 'cdrecord' from cdrtools pkg  \n\n  http://sourceforge.net/projects/cdrtools/files/alpha/  "
+fi
+if ! which mkisofs &>/dev/null ; then
+	exit_error "  Need 'mkisofs' from cdrtools pkg  \n\n  http://sourceforge.net/projects/cdrtools/files/alpha/  "
+fi
+
+#=========================================================================
+### Burner drive selection
+
+if [ "$FAKE_DRV" ] ; then
+	SELECTIONS='/dev/sr0|fake_optical_drv'
+else
+	SELECTIONS="$(probedisk | grep '|optical|' | cut -f1,3 -d "|" | tr " " '_' )"
+fi
+SELECTIONX="$(echo "$SELECTIONS" | tr '|' " " | tr "\n" " ")"
+SELECTIONX=${SELECTIONX# } #zzz
+SELECTIONX=${SELECTIONX# } #zzz
+if [ -z "$SELECTIONS" ] ; then
+	exit_error "  Sorry, no CD/DVD/BD drive detected  "
+fi
+LOG "SELECTIONX: $SELECTIONX"
+
+drivecount=$(echo "$SELECTIONS" | wc -l)
+if [ $drivecount -eq 1 ] ; then
+	read -r BURNERDRIVE CDDESCR <<< "${SELECTIONX}"
+else
+	if [ "$GUI" ] ; then
+		res=$(yad --title="Choose burner device" --no-buttons ${BURNISOICON} \
+			--width=350 --height=180 --center --separator=" " --list --radio-list \
+			--column="drive" --column="description" ${SELECTIONX} ${BURNISOICON}
+		)
+		[ ! "$res" ] && LOG "User cancelled operation" && exit 1
+		read -r BURNERDRIVE CDDESCR <<< "$res"
+	else
+		echo 'TODO cli for choosing burner drive...'
+		exit
+	fi
+fi
+
+LOG "BURNERDRIVE: $BURNERDRIVE"
+LOG "CDDESCR: $CDDESCR"
+
+# disc info
+DRVINFO=$(LANG=C cdrecord -prcap dev=${BURNERDRIVE} 2>/dev/null)
+
+#Current: DVD+R/DL
+#Current: DVD-R sequential recording
+DISC_IN_DRIVE=$(echo "$DRVINFO" | grep 'Current:' | cut -f 2 -d ' ')
+DISC_IN_DRIVE=${DISC_IN_DRIVE##* }
+case $DISC_IN_DRIVE in
+	DVD*) DISC_TYPE='DVD' ;;
+	CD*)  DISC_TYPE='CD'  ;;
+	BD*)  DISC_TYPE='BD'  ;;
+esac
+LOG "DISC_IN_DRIVE: $DISC_IN_DRIVE"
+LOG "DISC_TYPE    : $DISC_TYPE"
+export DISC_IN_DRIVE DISC_TYPE
+
+# Device seems to be: Generic mmc2 DVD-R/DVD-RW/DVD-RAM.
+DRVTYPE=$(echo "$DRVINFO" | grep 'Device seems to be:')
+DRVTYPE=${DRVTYPE##* } #DVD-R/DVD-RW/DVD-RAM
+if [ "$FAKE_DRV" ] ; then
+	[ -z "$DRVTYPE" ] && DRVTYPE='DVD-RW'
+fi
+case $DRVTYPE in
+	none)
+		exit_error "  No disc in ${BURNERDRIVE}. Please insert one  "
+		;;
+	DVD-*)
+		case $DRVTYPE in
+			*DVD-RW*|*DVD-RAM*) DRIVE_TYPE='DVD' ;;
+			*) exit_error "  You have a DVD drive, but it's not a burner drive...  " ;;
+		esac
+		;;
+	CD-*)
+		case $DRVTYPE in
+			*CD-RW*) DRIVE_TYPE='CD' ;;
+			*) exit_error "  You have a CD drive, but it's not a burner drive...  " ;;
+		esac
+		;;
+	BD-*)
+		case $DRVTYPE in
+			*BD-RW*) DRIVE_TYPE='CD' ;;
+			*) exit_error "  You have a Blu-ray drive, but it's not a burner drive...  " ;;
+		esac
+		;;
+esac
+if [ "$FAKE_DRV" ] ; then
+	[ -z "$DISC_IN_DRIVE" ] && DISC_IN_DRIVE='DVD'
+	[ -z "$DISC_TYPE" ] && DISC_TYPE='DVD'
+else
+	if [ -f /lib/udev/cdrom_id ] ; then
+		cdrom_id=$(/lib/udev/cdrom_id $BURNERDRIVE)
+		eval "$cdrom_id"
+		if [ "$ID_CDROM_MEDIA_STATE" = 'blank' ] ; then
+			export DISC_IN_DRIVE_IS_BLANK=1
+		fi
+	fi
+fi
+#ID_CDROM_DVD_RW
+#=========================================================================
+
+# iso file
+if [ ! "$ISOFILE" ] ; then
+	if [ "$GUI" ] ; then
+		ISOFILE=$(yad --title="Select ISO file" --file --filename="${PWD}/*" --width=640 --height=480 --button=gtk-ok --button=gtk-cancel --center ${BURNISOICON})
+		[ ! -f "$ISOFILE" ] && LOG "User cancelled operation" && exit 1
+	else
+		usage;
+	fi
+	FILETYPE="ISO"
+elif [ -d "$ISOFILE" ] ; then
+	DIR=$ISOFILE
+	FILETYPE="DIR"
+	LABEL=${DIR##*/} #basename
+	LABEL=${LABEL^^} #uppercase
+	LABEL=${LABEL// /_} # replace ' ' with '_'
+	LOG "LABEL: $LABEL"
+	if [ -d "$DIR/VIDEO_TS" ] ; then
+		DVD_VIDEO=1 ## Check if dir qualifies as DVD Video
+	fi
+	dirmsg="You have selected a directory. We'll attemp to burn a data disc on the fly \n\n"
+elif [ -f "$ISOFILE" ] ; then
+	FILETYPE="ISO"
+	case ${ISOFILE,,} in
+		*.iso) ok=1 ;;
+		*) exit_error "  File does not have the .iso extension: \n\n  ${ISOFILE##*/}  " ;;
+	esac
+else #[ ! -f "$ISOFILE" ] ; then
+	exit_error "Invalid file: \n\n$ISOFILE"
+fi
+
+ISOFILE=$(realpath "$ISOFILE")
+
+bytes=$(filesize -b "$ISOFILE")
+#echo "bytes: $bytes"
+FILESIZE=$(filesize -bytes $bytes)
+LOG "FILETYPE: $FILETYPE"
+LOG "ISOFILE: $ISOFILE"
+[ "$FILETYPE" = "DIR" ] && DIR=$ISOFILE && LOG "DIR: $DIR"
+LOG "FILESIZE: $FILESIZE"
+[ "$DVD_VIDEO" ] && LOG "DVD_VIDEO: ${DVD_VIDEO}"
+
+#-- guess ISO_TYPE based on file size...
+filesizem=$(filesize -bytes -m $bytes)
+filesizem=${filesizem%.*}
+if [ ${filesizem} -gt 8700 ] ; then
+	ISO_TYPE='BD'
+elif [ ${filesizem} -gt 800 ] ; then
+	ISO_TYPE='DVD'
+else
+	ISO_TYPE='CD'
+fi
+#--
+
+if [ "$MEDIA_TYPE" ] ; then #command line
+	case "$ISO_TYPE" in
+		BD)
+			case $DISC_TYPE in CD|DVD)
+				exit_error "  Selected $FILETYPE is too big for a $DISC_TYPE disc  " ;;
+			esac
+			;;
+		DVD)
+			case $DISC_TYPE in
+				CD) exit_error "  Selected $FILETYPE is too big for a $DISC_TYPE disc  " ;;
+			esac
+			if [ ${filesizem} -gt 4700 ] ; then  #DVD9
+				if [[ $DISC_IN_DRIVE != DVD*DL ]] ; then
+					exit_error "  Selected $FILETYPE is too big for a $DISC_TYPE disc. \n Need a double-layer DVD ...  "
+				fi
+			fi
+			;;
+	esac
+
+else # determine MEDIA_TYPE
+
+	case "$ISO_TYPE" in
+		BD)
+			case $DISC_TYPE in CD|DVD)
+				exit_error "  Selected $FILETYPE is too big for a $DISC_TYPE disc  " ;;
+				*) MEDIA_TYPE="$DISC_TYPE" ;;
+			esac
+			;;
+		DVD)
+			case $DISC_TYPE in
+				CD) exit_error "  Selected $FILETYPE is too big for a $DISC_TYPE disc  " ;;
+				*) MEDIA_TYPE="$DISC_TYPE" ;;
+			esac
+			if [ ${filesizem} -gt 4700 ] ; then  #DVD9
+				if [[ $DISC_IN_DRIVE != DVD*DL ]] ; then
+					exit_error "  Selected $FILETYPE is too big for a $DISC_TYPE disc. \n Need a double-layer DVD ...  "
+				fi
+			fi
+			;;
+		CD)
+			MEDIA_TYPE="$DISC_TYPE"
+			;;
+	esac
+
+	if [ ! "$MEDIA_TYPE" ] ; then
+		if [ "$DISC_TYPE" = "$ISO_TYPE" ] ; then
+			MEDIA_TYPE="$DISC_TYPE"
+		elif [ "$DISC_TYPE" ] ; then
+			ISO_TYPE="$DISC_TYPE"
+		fi
+	fi
+
+	if [ ! "$MEDIA_TYPE" ] ; then
+		txt="${dirmsg} Disc in drive is: $DISC_IN_DRIVE \n\n Is this a $DISC_TYPE ISO?: \n  ${ISOFILE##*/} (${FILESIZE})  "
+		if [ "$GUI" ] ; then
+			yad --center --title=burniso --text="$txt" \
+				--button=gtk-yes:0 --button=gtk-no:1 --buttons-layout=center --text-align=center --image=${dlg_image} ${BURNISOICON}
+			[ $? -eq 0 ] && MEDIA_TYPE=${ISO_TYPE}
+		else
+			echo 'TODO: curses gui for confirming media type'
+			exit
+		fi
+	fi
+
+	# Welcome dialog
+	if [ ! "$MEDIA_TYPE" ] ; then
+		if [ "$GUI" ] ; then
+			msgx="  Choose whether you want to burn to a CD, DVD or BD media  
+  BDs are burnt 'closed'  " 
+		res=$(yad --title="burniso" --text="$msgx" --text-align=center ${BURNISOICON} \
+			--center --separator="\n" --list --radio-list --no-headers \
+			--column="" --column="" \
+			"CD" "CD-R or CD-RW (must be blank)" \
+			"DVD" "DVD-R or DVD-RW (must be blank)" \
+			"BD" "BD-R (must be blank)" \
+			--button=gtk-ok:0 --button=gtk-cancel:1 --buttons-layout=center)
+			[ $? -ne 0 ] || [ ! "$res" ] && LOG "User cancelled operation" && exit 1
+			LOG $res
+			read -r MEDIA_TYPE <<< "$res"
+		else
+			echo 'TODO: curses GUI for selecting MEDIA_TYPE...'
+			exit
+		fi
+	fi
+fi
+LOG "MEDIA_TYPE: ${MEDIA_TYPE}"
+export MEDIA_TYPE
+
+dlg_image=${CDIMAGE}
+case ${MEDIA_TYPE} in
+	CD)  BURNSPEED=8 ; export burncombo="!4!8!16!32!48" ;;
+	DVD) BURNSPEED=4 ; export burncombo="!2!4!8!16" ;;
+	BD)  BURNSPEED=2 ; export burncombo="!1!2!4!8";;
+esac
+[ "$DVD_VIDEO" ] && dlg_image=${DVDVIDEOIMG}
+
+msg1='File to burn:'
+[ "$FILETYPE" = "DIR" ] && msg1='Directory to burn:'
+msgburner="  ${msg1}\n   ${ISOFILE##*/} (${FILESIZE})  \n\n  Burner device:  \n    ${SELECTIONX}  "
+
+if [ ! -f /etc/cdburnerdevice ] ; then
+	echo -n "${BURNERDRIVE#/dev/}" > /etc/cdburnerdevice
+fi
+
+# Check if drive is mounted
+ITSMOUNTED="$(mount | grep "$BURNERDRIVE")"
+while [ "$ITSMOUNTED" ]
+do
+	LOG "ITSMOUNTED: $ITSMOUNTED"
+	msgx=" The $BURNERDRIVE CD/DVD drive, described as: \n	$CDDESCR \n is currently mounted. \n
+ Please unmount CD drive, then click OK button..."
+	if [ "$GUI" ] ; then
+		yad --center --title=burniso --text="$msgx" --image=dialog-warning --button=gtk-ok --button=Abort:10 ${BURNISOICON}
+		[ $? -eq 10 ] && exit 1
+	else
+		echo 'TODO: curses GUI for unmounting drv'
+		exit
+	fi
+	ITSMOUNTED="$(mount | grep "$BURNERDRIVE")"
+done
+
+#=========================================================================
+
+
+case ${MEDIA_TYPE} in
+	#CD) BURNMULTI="-multi -tao padsize=300k -data " ;; #multi cd
+	DVD)
+		if [ "$DVD_VIDEO" ] ; then
+			DVDBURNTYPE=DVD_VIDEO
+		elif [ "$FILETYPE" = "DIR" ] && [ "$GUI" ] ; then
+			# http://forums.debian.net/viewtopic.php?f=10&t=119788
+			msgx="  You have selected $FILETYPE:
+  ${ISOFILE##*/}  \n
+  'MULTI': burn multi-session DVD (growisofs - 1st track)
+  'MULTI x': burn multi-session DVD (growisofs - 2nd+ track)
+  'CDRECORD': burn a DVD using cdrecord (safest method, required for a DVD-9)"
+			BURNMULTI="dvd: no"
+			BURNMSG="\n  blank DVD-R. A DVD+/-RW will be fast-wiped if it has data  \n" #multi dvd
+			yad --center --title=burniso --text="$msgx" \
+				--button="MULTI":1 --button="MULTI x":2 --button="CDRECORD":0 \
+				--buttons-layout=center --text-align=center --image=${dlg_image} ${BURNISOICON}
+			case $? in
+				0) DVDBURNTYPE='cdrecord'   ; LOG " --- DVD: BURN WITH CDRECORD --- " ;;
+				1) DVDBURNTYPE='growisofs1' ; BURNMULTI="dvd: yes" ; LOG " --- DVD: BURN WITH GROWISOFS, 1st TRACK --- " ;;
+				2) DVDBURNTYPE='growisofsx' ; BURNMULTI="dvd: yes" ; LOG " --- DVD: BURN WITH GROWISOFS, 2nd+ TRACK --- " ;;
+				*) LOG "User cancelled operation" ; exit 1 ;;
+			esac
+		elif [ "$CLI" ] ; then
+			echo 'TODO: curses gui for selecting write strategy..'
+			exit 1
+		fi
+		LOG "DVDBURNTYPE: $DVDBURNTYPE"
+
+		;;
+esac
+
+if [ "$FILETYPE" = "DIR" ] ; then
+	warn="\n\nIt's advised to use \nthe lowest speed possible unless your hardware is fast "
+	case $MEDIA_TYPE in     # 1 kbit = 0.125 KB
+		CD)  BURNSPEED=4 ;; #1x = 150Kbps	18 kb/s		#8x = 146kb/s	#16x = 292kb/s
+		DVD) BURNSPEED=2 ;; #1x = 1350Kbps	165kb/s		#2x = 330kb/s	#4x = 660kb/s
+		BD)  BURNSPEED=1 ;; #1x = 4500kbps	560kb/s
+	esac
+fi
+
+LOG "BURNMULTI: $BURNMULTI"
+LOG "BURNMSG: $BURNMSG"
+LOG "BURNSPEED: $BURNSPEED"
+
+# Check drive
+driveinfo=$(cdrecord -checkdrive dev=${BURNERDRIVE} | grep -v Removable)
+if [ "$GUI" ] ; then
+	[ $? -ne 0 ] && yad --center --title="burniso" --text="$driveinfo" --image=dialog-warning --button=gtk-ok:0 ${BURNISOICON}
+else
+	echo "TODO: curses gui to validate drive"
+	exit
+fi
+
+RECHECK="yes"
+
+if [ "$FAKE_DRV" ] ; then
+	TEST=1
+fi
+
+#=========================================================================
+export MKISOFS="mkisofs"
+export DVD_VIDEO DVDBURNTYPE
+export LABEL FILETYPE
+export CDRECORD
+export BURNMULTI BURNSPEED BURNERDRIVE
+export ISOFILE DIR
+export MEDIA_TYPE
+export burning=/tmp/burniso$$
+export TEST
+
+function gracetime() {
+	echo -en "\nPress CTRL-C to cancel\nBurn process starts in" 
+	for ((z=${WT};z>=0;z--)) ; do sleep 1 ; echo -n " $z" ; done
+	echo ; echo
+}
+export -f gracetime
+
+function BurnISO() {
+	clear
+	sync
+	#GT='gracetime=8'
+	WT=7
+	[ ! "$TEST" ] && LOG "Now executing:"
+
+	case $DISC_IN_DRIVE in DVD*DL)
+		LAYERBREAK=',layerbreak' ;;
+	esac
+
+	# specify a buffer to accommodate most situations...
+	# burn speed: some (or most) drives don't accept very low writing speeds
+	# some writing speeds may be ignored (6,10,etc)..
+	case ${MEDIA_TYPE} in
+		CD)
+			case ${BURNSPEED} in
+				1|2|4|6|8)         BUFFERSIZE=4m ;;
+				10|12|14|16|18|20) BUFFERSIZE=8m ;;
+				*)                 BUFFERSIZE=12m ;;
+			esac
+			;;
+		DVD)
+			case ${BURNSPEED} in
+				1|2|4|6) BUFFERSIZE=16m ;;
+				8|10|12) BUFFERSIZE=32m ;;
+				*)       BUFFERSIZE=48m ;;
+			esac
+			;;
+		BD)
+			case ${BURNSPEED} in
+				1) BUFFERSIZE=16m  ;;
+				2) BUFFERSIZE=32m  ;;
+				4) BUFFERSIZE=48m  ;;
+				6) BUFFERSIZE=64m  ;;
+				8) BUFFERSIZE=80m ;;
+				*) BUFFERSIZE=128m ;;
+			esac
+			;;
+	esac
+
+	if [ "$FILETYPE" = "ISO" ] ; then
+		LOG "# ${CDRECORD} -v -dao -eject fs=${BUFFERSIZE} speed=${BURNSPEED} driveropts=burnfree${LAYERBREAK} ${GT} dev=${BURNERDRIVE} "$ISOFILE""
+		[ ! "$TEST" ] && ${CDRECORD} -v -dao -eject fs=${BUFFERSIZE} speed=${BURNSPEED} driveropts=burnfree${LAYERBREAK} ${GT} dev=${BURNERDRIVE} "$ISOFILE"
+	fi
+
+	if [ "$FILETYPE" = "DIR" ] ; then
+		tsize=$(mkisofs -print-size "$DIR" 2>&1 | tail -1)s	
+		case ${MEDIA_TYPE} in
+			CD) 
+				LOG "# mkisofs -R -udf -V ${LABEL} -output-charset UTF-8 -o - "$DIR" | \ "
+				LOG "  ${CDRECORD} -v -dao -eject fs=${BUFFERSIZE} speed=${BURNSPEED} driveropts=burnfree ${GT} tsize=${tsize} dev=${BURNERDRIVE} -"
+				[ ! "$TEST" ] && gracetime
+				[ ! "$TEST" ] && mkisofs -R -udf -V ${LABEL} -output-charset UTF-8 -o - "$DIR" | \
+				  ${CDRECORD} -v -dao -eject fs=${BUFFERSIZE} speed=${BURNSPEED} driveropts=burnfree ${GT} tsize=${tsize} dev=${BURNERDRIVE} -
+				;;
+			DVD)
+				case ${DVDBURNTYPE} in
+					DVD_VIDEO)
+						LOG "# mkisofs -V ${LABEL} -dvd-video -udf -o - "$DIR" | \ "
+						LOG "  ${CDRECORD} -v -eject speed=${BURNSPEED} fs=${BUFFERSIZE} driveropts=burnfree${LAYERBREAK} ${GT} tsize=${tsize} dev=${BURNERDRIVE} -"
+						[ ! "$TEST" ] && gracetime
+						[ ! "$TEST" ] && mkisofs -V ${LABEL} -dvd-video -udf -o - "$DIR" | \
+						${CDRECORD} -v -eject fs=${BUFFERSIZE} speed=${BURNSPEED} driveropts=burnfree${LAYERBREAK} ${GT} tsize=${tsize} dev=${BURNERDRIVE} -
+						;;
+					growisofs1)
+						LOG "# growisofs -speed=${BURNSPEED} -use-the-force-luke=bufsize:${BUFFERSIZE} -Z ${BURNERDRIVE} -R -udf -iso-level 3 -V ${LABEL} "$ISOFILE""
+						[ ! "$TEST" ] && gracetime
+						[ ! "$TEST" ] && growisofs -speed=${BURNSPEED} -use-the-force-luke=bufsize:${BUFFERSIZE} -Z ${BURNERDRIVE} -R -udf -iso-level 3 -V ${LABEL} "$ISOFILE"
+						;;
+					growisofsx)
+						LOG "# growisofs -speed=${BURNSPEED} -use-the-force-luke=bufsize:${BUFFERSIZE} -M ${BURNERDRIVE} -R -udf -iso-level 3 -V ${LABEL} "$ISOFILE""
+						[ ! "$TEST" ] && gracetime
+						[ ! "$TEST" ] && growisofs -speed=${BURNSPEED} -use-the-force-luke=bufsize:${BUFFERSIZE} -M ${BURNERDRIVE} -R -udf -iso-level 3 -V ${LABEL} "$ISOFILE"
+						;;
+					*)
+						LOG "# mkisofs -R -udf -iso-level 3 -V ${LABEL} -output-charset UTF-8 -o - "$DIR" | \ "
+						LOG "  ${CDRECORD} -dao -eject fs=${BUFFERSIZE} speed=${BURNSPEED} driveropts=burnfree${LAYERBREAK} ${GT} tsize=${tsize} dev=${BURNERDRIVE} -"
+						[ ! "$TEST" ] && mkisofs -R -udf -iso-level 3 -V ${LABEL} -output-charset UTF-8 -o - "$DIR" | \
+						  ${CDRECORD} -dao -eject fs=${BUFFERSIZE} speed=${BURNSPEED} driveropts=burnfree${LAYERBREAK} ${GT} tsize=${tsize} dev=${BURNERDRIVE} -
+						;;
+				esac
+				;;
+			BD)
+				#avoid -J -joliet-long 
+				LOG "# mkisofs -R -udf -iso-level 3 -V ${LABEL} -output-charset UTF-8 -o - "$DIR" | "
+				LOG "  ${CDRECORD} -v -dao -eject fs=${BUFFERSIZE} speed=${BURNSPEED} driveropts=burnfree${LAYERBREAK} ${GT} tsize=${tsize} dev=${BURNERDRIVE} -"
+				[ ! "$TEST" ] && gracetime
+				[ ! "$TEST" ] && mkisofs -R -udf -iso-level 3 -V ${LABEL} -output-charset UTF-8 -o - "$DIR" | \
+				  ${CDRECORD} -v -dao -eject fs=${BUFFERSIZE} speed=${BURNSPEED} driveropts=burnfree${LAYERBREAK} ${GT} tsize=${tsize} dev=${BURNERDRIVE} -
+				;;
+		esac
+	fi
+
+	if [ ! "$TEST" ] ; then
+		echo && LOG "Exit code: $?"
+		LOG "...finished"
+	else
+		echo
+		echo 'end of test..'
+	fi
+	rm -f ${burning}
+	sync
+	read zzz
+}
+export -f BurnISO
+#=========================================================================
+
+#=========================================================================
+#                      burn-again-loop
+#=========================================================================
+while [ 1 ]
+do
+
+	burncombo=${burncombo//!${BURNSPEED}!/!^${BURNSPEED}!}
+	burncombo=${burncombo#!}
+	burncombo=${burncombo%!}
+	msgx="  Make sure there is a blank $MEDIA_TYPE in $BURNERDRIVE  
+$BURNMSG
+  $msgburner ${warn}"
+	if [ "$GUI" ] ; then
+		BURNSPEED=$(yad --center --title="burniso: Burn $MEDIA_TYPE" --text="$msgx" --text-align=center \
+		--form --field="Set burn speed::CB" "$burncombo" --separator="" \
+		--button=BURN:0 --button="Verify only":1 --button=test:2 --button=gtk-cancel:3 --image=${dlg_image} ${BURNISOICON})
+		case $? in
+			0) true ;;
+			1) VERIFYONLY=1 ;;
+			2) TEST=1 ;;
+			*) LOG "User cancelled operation" ; exit 1 ;;
+		esac
+	else
+		echo 'TODO: curses gui for selecting write speed'
+		exit 1
+	fi
+
+	if [ ! "$VERIFYONLY" ] ; then
+		LOG "BURN"
+		echo -n > ${burning}
+		rxvt -title burniso -geometry 110x37 -e bash -c BurnISO
+	else
+		LOG "VERIFY ONLY"
+	fi
+	if [ -f "$burning" ] ; then
+		rm -f ${burning}
+		exit_error "\n  Burn process has been aborted  \n"
+	fi
+ 
+	if [ "$TEST" ] ; then
+		geany /tmp/burniso.log &
+		exit
+	fi
+
+	# ******Verify burn******
+	DEVNAME="$(echo -n "$BURNERDRIVE" | grep '/dev' | cut -f 3 -d '/')"
+	if [ ! "$DEVNAME" = "" -a "$RECHECK" = "yes" ];then
+
+		msgx="Would you like to verify that the burn was successful? \n\nThis may take a while depending on the size of the iso file \n\nMake sure the CD/DVD drive is closed and the drive lights finished blinking"
+		yad --center --image=dialog-question --title="VERIFY BURN" --text="$msgx" --button=gtk-yes:0 --button=gtk-no:1 --buttons-layout=center ${BURNISOICON}
+		if  [ $? -ne 0 ] ;then
+			RECHECK="no" #do not check if doing repeat burns.
+			continue
+		fi
+		burnerror=/tmp/burnisoverifyerr$$
+
+		CDMOUNT="/mnt/burnisocd$$"
+		mkdir -p ${CDMOUNT}
+		mount -t udf -o loop ${BURNERDRIVE} ${CDMOUNT}
+		[ $? -ne 0 ] && mount -t iso9660 -o loop ${BURNERDRIVE} ${CDMOUNT}
+
+		if [ "$FILETYPE" = "DIR" ] ; then
+			ISOMOUNT="$ISOFILE" # $DIR
+		else
+			ISOMOUNT="/mnt/burnisoiso$$"
+			mkdir -p /mnt/burnisoiso$$
+			mount -t udf -o loop "${ISOFILE}" ${CDMOUNT} || \
+				mount -t iso9660 -o loop "${ISOFILE}" ${CDMOUNT}
+		fi
+
+		(
+		LOG '#' diff -r ${CDMOUNT} ${ISOMOUNT}
+		LOG "Comparing directories"
+		diff -r ${CDMOUNT} "${ISOMOUNT}"
+		ret=$?
+		echo ; LOG "Exit code: $ret" ; echo
+		if [ $ret -eq 0 ] ; then
+			LOG "THERE WERE ***NO*** ERRORS"
+			echo
+			echo "The burn was verified as good!"
+			echo "You may click OK now to close this window"
+		else
+			LOG "THERE WERE ERRORS"
+			echo 'err' > ${burnerror}
+		fi
+		) | yad --title="burniso" --center --width=750 --height=500 \
+			--text="  Please wait while the program verifies the burnt data" \
+			--text-info --margins="10" --wrap --back="#D7F3F2" --tail \
+			--button=gtk-ok --center ${BURNISOICON}
+
+		sync
+		umount ${CDMOUNT} 2>/dev/null
+		[ $? -eq 0 ] && rm -rf ${CDMOUNT} 2>/dev/null
+		if [ "$ISOMOUNT" ] ; then
+			umount -d ${ISOMOUNT} 2>/dev/null
+			[ $? -eq 0 ] && rm -rf ${ISOMOUNT} 2>/dev/null
+		fi
+
+		if [ -f "${burnerror}" ] ; then
+			rm -f ${burnerror}
+			exit 1
+		fi
+	fi
+
+	#eject ${BURNERDRIVE}
+	msgx="  If all went well, you have now burnt iso file \n  $ISOFILE  \n to a ${MEDIA_TYPE}!  \n
+  If you want to burn the iso file to another $MEDIA_TYPE, click 'REPEAT' button...  \n
+  Otherwise, click 'FINISHED' to quit...   "
+	yad --center --title="burniso: Finished" --text="$msgx" --button="FINISHED":0 --button="REPEAT":1 --buttons-layout=center --text-align=center ${BURNISOICON}
+	[ $? -ne 1 ] && break
+done #burn-again-loop
+
+###END###

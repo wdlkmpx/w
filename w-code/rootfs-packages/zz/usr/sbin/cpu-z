@@ -1,0 +1,97 @@
+#!/bin/bash
+
+########################################################################
+
+function biosinfo() {
+	#must use dmidecode 3.0+
+	x=1
+	echo "Bios information:"
+	dmidecode -t 0 2>/dev/null | \
+	grep -E 'Vendor:|Version:|Release Date:|Runtime Size:|ROM Size:'
+	echo
+	echo "Motherboard information:"
+	dmidecode -t 2 2>/dev/null | \
+	grep -E 'Manufacturer:|Product Name:|Version:|Serial Number:'
+	lspci | grep bridge
+	echo
+}
+
+########################################################################
+
+function xcut() {
+	local n=$1 ; shift $((n+1)) ; echo "$@"
+}
+
+function raminfo_dmidecode() {
+	raminfo=$(dmidecode --type memory)
+	flag=""
+	while read line
+	do
+		case "$line" in "Memory Device") flag=1 ;; esac
+		[ ! -z $flag ] && echo "$line"
+	done <<< "$(echo "$raminfo")"
+}
+
+function raminfo_decodedimms() {
+	modprobe eeprom || exit 1
+	modprobe at24 || exit 1
+	which decode-dimms 1>/dev/null || exit 1
+	raminfo=$(decode-dimms) || exit 1
+	x=1
+	echo "$raminfo" | \
+	  while read line ; do
+		case $line in
+			'Guessing DIMM'*) xcut 4 $line ;;
+			'Fundamental Memory type'*) xcut 3 $line ;;
+			'Maximum module speed'*) xcut 3 $line ;;
+			'Size'*) xcut 1 $line ;;
+		esac
+	  done | \
+		while read xline ; do
+			if [ $x -lt 4 ] ; then
+				echo -n "$xline "
+			else
+				echo "$xline"
+				x=0
+			fi
+			let x++
+		done
+}
+
+function raminfo() {
+	echo "RAM information:"
+	echo "DMIDECODE:"
+	raminfo_dmidecode
+	if which decode-dimms &>/dev/null ; then
+		echo
+		echo "decode-dimms:"
+		raminfo_decodedimms
+	fi
+	echo
+}
+
+########################################################################
+
+function cpu_id_drivers() {
+	modprobe cpuid
+	modprobe msr
+	mkdir -p /dev/cpu
+	for i in 0 1 2 3 4 5 6 7
+	do
+		[ ! -e /dev/cpu/$i ] && mkdir /dev/cpu/$i
+		cd /dev/cpu/$i
+		[ ! -e cpuid ] && mknod cpuid c 203 $i
+		[ ! -e msr ] && mknod msr c 202 $i
+	done
+}
+
+########################################################################
+
+biosinfo
+raminfo
+if which cpuinfo &>/dev/null ; then
+	echo
+	cpuinfo -nv $@
+fi
+
+### END ###

@@ -1,0 +1,320 @@
+#!/bin/bash
+# originally by rcrsn51 2012-08-10
+#
+# requires: busybox pscan, pnscan
+#           arp-scan or arp (net-tools)
+#
+
+export TEXTDOMAIN=peasyport
+export OUTPUT_CHARSET=UTF-8
+
+VERSION=3.0w
+
+HELP ()	{
+	Xdialog --left --title "PeasyPort" --msgbox "$(gettext 'Enter the IP and Port as single values or as ranges:\n     IP  192.168.2.10-100    Port  80\n     IP  192.168.2.1             Port 1-1024\nYou cannot scan an IP range and a Port range at the same time.\n\nTo find Windows/Samba shares, scan for Port 139.\nTo find network printers, scan for Ports 631, 515, 9100.\n\nThe MAC function finds the MAC addresses of all machines\non the network.\n\nThe Wake function pings every host in the IP range.\n')" 0 0
+}
+export -f HELP
+
+SETSPEED() {
+	[ "$SS" = "true" ] && TIMEOUT=2000 && SCANWAIT=5 && RETRIES=3
+	[ "$SN" = "true" ] && TIMEOUT=1000 && SCANWAIT=3 && RETRIES=2
+	[ "$SF" = "true" ] && TIMEOUT=100 && SCANWAIT=1 && RETRIES=2
+}
+export -f SETSPEED
+
+SCAN() {
+	if [ -z "$IPS" ] || [ -z "$PORTS" ]; then
+		Xdialog --title " " --msgbox "$(gettext 'Enter an IP and a Port!')" 0 0
+		exit
+	fi
+
+	IPRANGE=$(echo $IPS | grep "-")
+	PORTRANGE=$(echo $PORTS | grep "-")
+
+	PORTSCAN=
+	IPSCAN=
+
+	if [ -n "$IPRANGE" -a -n "$PORTRANGE" ]; then
+		Xdialog --title " " --msgbox "$(gettext 'You cannot scan an IP range and a\nPort range at the same time!')" 0 0
+	elif [ -n "$PORTRANGE" ]; then
+		PORTSCAN=1
+	else
+		IPSCAN=1
+	fi
+	
+	SETSPEED
+	rm -f /tmp/peasyport.txt
+
+	if [ "$PORTSCAN" ] ; then
+		echo PORTCAN
+		IPS=${IPS%% *}
+		PORTS=${PORTS%% *}
+		ONEIP=${IPS// }	#strip out any spaces
+		PORTS=${PORTS// }
+		FIRSTPORT=${PORTS%-*}
+		LASTPORT=${PORTS#*-}
+		[ -z "$LASTPORT" ] && LASTPORT=$FIRSTPORT
+		RANGE=$((LASTPORT-FIRSTPORT))
+
+		Xdialog --no-buttons --title " " --infobox "$(gettext 'Scanning ...')" 0 0 120000 &
+		MSGPID=$!
+
+		busybox pscan -t ${TIMEOUT} -p ${FIRSTPORT} -P ${LASTPORT} \
+			${ONEIP} > /tmp/peasyport.txt 2>&1
+		kill $MSGPID
+		while read F1 F2 F3 F4 ETC
+		do
+			if [ "$F1" = "Scanning" ] ; then
+				current_ip=$F2
+			fi
+			if [ "$F3" = "open" ] ; then
+				echo "${current_ip}: $F1 $F2 $F3 $F4 $ETC"
+			fi
+		done < /tmp/peasyport.txt \
+			| Xdialog --no-buttons --title "PeasyPort" --textbox - 15 30
+
+		sleep $SCANWAIT
+		return
+	fi
+
+	if [ "$IPSCAN" ] ; then
+		echo IPSCAN
+		ONEPORT=${PORTS// }	#strip out any spaces
+		IPS=${IPS// }
+		FIRSTIP=${IPS%-*}
+		LASTIP=${IPS#*-}
+		[ -z "$LASTIP" ] && LASTIP=254
+
+		Xdialog --no-buttons --title " " --infobox "$(gettext 'Scanning ...')" 0 0 120000 &
+		MSGPID=$!
+
+		if type pnscan >/dev/null ; then
+			# pnscan pkg
+			(
+			if [ "$LASTIP" = "$FIRSTIP" ]; then		#just one IP selected
+				#echo "pnscan -t $TIMEOUT -v $FIRSTIP $ONEPORT"
+				pnscan -t $TIMEOUT -v $FIRSTIP $ONEPORT
+			else
+				LASTIP=${FIRSTIP%.*}"."$LASTIP
+				#echo "pnscan -t $TIMEOUT -v $FIRSTIP:$LASTIP $ONEPORT"
+				pnscan -t $TIMEOUT -v $FIRSTIP:$LASTIP $ONEPORT
+			fi
+			) >/tmp/peasyport.txt 2>&1
+			sync
+			kill $MSGPID
+			grep -v -E "refused|connect|route" /tmp/peasyport.txt \
+				| tr -s " " | cut -d " " -f 1-3 | sort -k3,3n \
+				| Xdialog --no-buttons --title "PeasyPort" --textbox - 15 30
+		else
+			(
+			# busybox pscan
+			if [ "$LASTIP" = "$FIRSTIP" ]; then		#just one IP selected
+				busybox pscan -t $TIMEOUT -p $ONEPORT -P $ONEPORT $FIRSTIP 
+			else
+				IPBASE=${FIRSTIP%.*}
+				X=${FIRSTIP##*.}
+				while [ $X -le $LASTIP ]
+				do
+					echo "busybox pscan -t $TIMEOUT -p $ONEPORT -P $ONEPORT ${IPBASE}.${X}"
+					busybox pscan -t $TIMEOUT -p $ONEPORT -P $ONEPORT ${IPBASE}.${X}
+					X=$((X+1))
+				done
+			fi
+			) >/tmp/peasyport.txt 2>&1
+			kill $MSGPID
+			sync
+			while read F1 F2 F3 F4 ETC
+			do
+				if [ "$F1" = "Scanning" ] ; then
+					current_ip=$F2
+				fi
+				if [ "$F3" = "open" ] ; then
+					echo "${current_ip}: $F1 $F2 $F3 $F4 $ETC"
+				fi
+			done < /tmp/peasyport.txt \
+				| Xdialog --no-buttons --title "PeasyPort" --textbox - 15 30
+		fi
+		return
+	fi
+}
+export -f SCAN
+
+MAC () {
+	if ! type arp-scan >/dev/null 2>&1 && ! type arp >/dev/null 2>&1; then
+		yad --title "arp-scan" --window-icon error --center --button ok:0 --text "\n  Please install arp-scan...   \n" --image error
+		exit 1
+	fi
+	Xdialog --no-buttons --title " " --infobox "$(gettext 'Scanning ...')" 0 0 120000 &
+	MSGPID=$!
+
+	SETSPEED
+	SUBNET=$(echo $IPS | cut -d "." -f 1-3)  #first 3 octets
+	IFACE=$(route | grep "^$SUBNET" | awk '{print $8}')
+
+	FOUNDIPS=$(pnscan -t $TIMEOUT -v ${SUBNET}.1:${SUBNET}.254 10101 2>&1 | grep "refused" | awk '{print $1}')
+
+	if type arp-scan >/dev/null 2>&1 ] ; then
+		arp-scan -q -I $IFACE -r $RETRIES $FOUNDIPS 2>/dev/null | grep "^$SUBNET" | cut -f 1-2 > /tmp/macscan
+		kill $MSGPID
+		sort -t "." -k4,4n /tmp/macscan \
+			| Xdialog --no-buttons --title "PeasyPort" --textbox - 20 50
+	else
+		# arp cache
+		echo $FOUNDIPS
+		local=
+		for ip in ${FOUNDIPS} ; do
+			busybox ping -c 1 -W 5 -I $IFACE ${ip} >/dev/null 2>&1
+			l=""
+			for interface in $(ls /sys/class/net)
+			do
+				if="$(busybox ifconfig $interface)"
+				if echo "$if" | grep -q "${ip}" ; then
+					l=$(echo "$if" | grep "Ethernet")
+					l=$(echo $l)
+					l="$ip ${l##* }"
+				fi
+			done
+			if [ "$l" ] ; then
+				local="$local
+$l"
+			fi
+		done
+		sync
+		kill $MSGPID
+		sleep 3
+		(
+			echo "please install arp-scan"
+			echo "$local"
+			arp -n | grep ":" | tr -s ' '  | cut -f1,3 -d ' '
+		) | Xdialog --no-buttons --title "PeasyPort" --textbox - 20 50
+	fi
+}
+export -f MAC
+
+WAKE() {
+	SUBNET=$(echo $IPS | cut -d "." -f 1-3)  #first 3 octets
+	IFACE=$(route | grep "^$SUBNET" | awk '{print $8}')
+	RANGE=${IPS##*.}
+	RANGE=${RANGE// }
+	FIRST=${RANGE%-*}
+	LAST=${RANGE#*-}
+	[ -z "$LAST" ] && LASTIP=254
+	if [ $((LAST-FIRST)) -gt 20 ] ; then
+		Xdialog --title " " --msgbox "IP range $RANGE too big!\nMaximum 20 hosts." 0 0 && exit
+	fi
+
+	Xdialog --no-buttons --title " " --infobox "Waking hosts $RANGE ..." 0 0 30000 &
+	MSGPID=$!
+
+	for P in $(seq $FIRST $LAST); do
+		busybox ping -c1 -W1 -I $IFACE ${SUBNET}.$P >/dev/null 2>&1
+	done
+	kill $MSGPID
+}
+export -f WAKE
+
+#=======================================================
+#                      MAIN
+#=======================================================
+
+NETLIST=$(busybox ip route | grep -v -E "default|lo" | awk '{print $1 " " $1}')
+NETCOUNT=$(echo -n $NETLIST | wc -w) #doubled
+if [ $NETCOUNT -eq 0 ]; then
+	Xdialog --title " " --msgbox "$(gettext 'No networks detected!')" 0 0
+	exit
+elif [ $NETCOUNT -eq 2 ]; then
+	MYSUBNET=$(echo -n $NETLIST | cut -d "." -f 1-3)".1-254"
+else
+	PICK=$(Xdialog --title " " --stdout --no-tags --menubox "$(gettext 'Select a network')" 10 30 10 $NETLIST)
+	[ $? -gt 0 ] && exit
+	MYSUBNET=$(echo -n $PICK | cut -d "." -f 1-3)".1-254"
+fi
+
+#=================
+
+PORTS_COMBO="
+<item></item>
+<item>21 (FTP)</item>
+<item>22 (SSH)</item>
+<item>23 (TELNET)</item>
+<item>25 (SMTP)</item>
+<item>52 (DNS)</item>
+<item>80 (HTTP)</item>
+<item>113 (IDENT)</item>
+<item>139 (NETBIOS)</item>
+<item>443 (HTTPS)</item>
+<item>631 (IPP - printing)</item>
+<item>8080 (HTTP)</item>
+"
+
+IP_COMBO="<item>${MYSUBNET}</item>"
+LOCAL_IP=$(ifconfig -a | grep "Mask:255.255.255.0" | sed 's/.*addr:// ; s/ .*//')
+if [ "$LOCAL_IP" ] ; then
+	IP_COMBO="$IP_COMBO
+<item>${LOCAL_IP}</item>"
+else
+	IP_COMBO="$IP_COMBO
+<item>localhost</item>"
+fi
+
+export DIALOG="
+<window width-request=\"430\" title=\"PeasyPort v${VERSION}\" image-name=\"/usr/share/pixmaps/peasyport.svg\">
+	<vbox>
+		<frame>
+			<hbox>
+				<text><label>$(gettext 'IP')</label></text>
+				<combobox>
+					${IP_COMBO}
+					<variable>IPS</variable>
+				</combobox>
+				<text><label>$(gettext 'Port')</label></text>
+				<combobox>
+					${PORTS_COMBO}
+					<variable>PORTS</variable>
+				</combobox>
+			</hbox>
+		</frame>
+		<frame $(gettext 'Scan speed')>
+			<hbox>
+				<radiobutton> 
+					<label>$(gettext 'Slow')</label>
+					<variable>SS</variable>
+				</radiobutton>
+				<radiobutton>
+					<label>$(gettext 'Normal')</label>
+					<variable>SN</variable>
+					<default>true</default>
+				</radiobutton>
+				<radiobutton> 
+					<label>$(gettext 'Fast')</label>
+					<variable>SF</variable>
+				</radiobutton>
+			</hbox>
+		</frame>
+		<hbox>
+			<button>
+				<label>$(gettext 'Help')</label>
+				<action>HELP &</action>
+				<input file stock=\"gtk-help\"></input>
+			</button>
+			<text space-expand=\"true\"><label>\"  \"</label></text>
+			<button space-expand=\"true\" space-fill=\"true\">
+				<label>$(gettext 'Wake')</label>
+				<action>WAKE &</action>
+			</button>
+			<button space-expand=\"true\" space-fill=\"true\">
+				<label>$(gettext 'MAC')</label>
+				<action>MAC &</action>
+			</button>
+			<button space-expand=\"true\" space-fill=\"true\">
+				<label>$(gettext 'Scan')</label>
+				<action>SCAN &</action>
+				<input file stock=\"gtk-find\"></input>
+			</button>
+		</hbox>
+	</vbox>
+</window>"
+
+gtkdialog --center -p DIALOG
+killall pnscan 2> /dev/null
+

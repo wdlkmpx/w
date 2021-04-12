@@ -1,0 +1,119 @@
+#!/bin/sh
+
+. ../versions
+. ../../func
+. ../../build.conf
+
+[ -z "$BUILD" ] && BUILD=${DEF_BUILD}
+BUILD=${BUILD}-${eudev_rev} #versions
+
+URL=https://github.com/gentoo/eudev/archive
+PKG=eudev
+VER=${eudev_ver}
+COMP=tar.gz
+DESC="programs for dynamic creation of device nodes."
+DEPS=
+CAT=BuildingBlock
+DESKTOP=eudev.desktop
+CWD=$(pwd)
+# comment these 2 below if you use a custom package() function
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not
+
+ARCH=$(uname -m)
+case $ARCH in # set in build.conf
+ *64) 	LIBDIR=$LIBCONF64 
+		FLAGS=$CF64;;
+ arm*)	LIBDIR=$LIBCONFarm
+		FLAGS="-O2" ;;
+ i686) 	LIBDIR=$LIBCONF32 
+		FLAGS=$CF32;;
+	*) 	LIBDIR=$LIBCONF32 
+		FLAGS="-O2 -march=$ARCH -mtune=$ARCH";;
+esac
+#---
+
+prepare() {
+	sed -e 's/GROUP="dialout"/GROUP="uucp"/' -i rules/*.rules
+}
+
+build() {
+	# avoid hours of waiting
+	sed -i 's%XSLTPROC=.*%XSLTPROC=echo%' man/make.sh 
+	#--
+	./autogen.sh
+	CFLAGS="${FLAGS}" \
+	CXXFLAGS="${FLAGS}" \
+	./configure \
+		--prefix=/usr \
+		--bindir=/bin \
+		--with-rootprefix=/usr \
+		--sysconfdir=/etc \
+		--libdir=/${LIBDIR} \
+		--sbindir=/sbin \
+		--disable-static \
+		--disable-introspection \
+		--enable-kmod
+}
+
+package() {
+	make
+	make DESTDIR="${pkgdir}" install
+	make -C src/libudev DESTDIR="$pkgdir" install
+	make -C rule_generator DESTDIR="$pkgdir" install
+}
+
+#====================================================
+
+retrieve v${VER}.${COMP}
+extract v${VER}.${COMP}
+
+#--
+#build_configure $PKG $VER $LIBDIR "$FLAGS"
+	cd ${PKG}-${VER}
+	prepare
+	build
+	[ "$?" -eq 0 ] || exit
+	make $MKFLG
+	[ "$?" -eq 0 ] || exit
+	make install
+	make DESTDIR=$CWD/${PKG}-install install
+	cd -
+#--
+
+# fix pkgconfig location
+if [ -d ${PKG}-install/lib/pkgconfig ] ; then
+	mkdir -p ${PKG}-install/usr/lib
+	mv -f ${PKG}-install/lib/pkgconfig ${PKG}-install/usr/lib/
+fi
+if [ -d ${PKG}-install/lib64/pkgconfig ] ; then
+	mkdir -p ${PKG}-install/usr/lib64
+	mv -f ${PKG}-install/lib64/pkgconfig ${PKG}-install/usr/lib64/
+fi
+
+# fix /lib/udev/... location
+if [ -d ${PKG}-install/lib64/udev ] ; then
+	mkdir -p ${PKG}-install/lib
+	mv -f ${PKG}-install/lib64/udev ${PKG}-install/lib/
+fi
+
+(
+	if [ -d ${PKG}-install/lib64 ] ; then
+		cd ${PKG}-install/lib64
+	else
+		cd ${PKG}-install/lib
+	fi
+	ln -sv libudev.so.1 libudev.so.0 
+)
+
+if [ -f ${PKG}-install/lib/libudev.la ] ; then
+	mv ${PKG}-install/lib/libudev.la ${PKG}-install/usr/lib/
+fi
+
+if [ -f ${PKG}-install/lib64/libudev.la ] ; then
+	mv ${PKG}-install/lib64/libudev.la ${PKG}-install/usr/lib64/
+fi
+
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT
+
+### END ##

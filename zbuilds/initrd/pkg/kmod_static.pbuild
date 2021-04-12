@@ -1,0 +1,45 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+# ====================================================
+
+URL=https://www.kernel.org/pub/linux/utils/kernel/kmod
+SRC=kmod
+PKG=kmod_static
+VER=28 # 07-Jan-2021
+COMP=tar.xz
+DESC=""
+DEPS=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='bin/kmod'
+
+build() {
+	cd ${SRC}-${VER}
+	opts="--prefix=/
+--bindir=/bin
+--sysconfdir=/etc
+--with-rootlibdir=/lib"
+	_configure
+	sed -i 's|^LDFLAGS = *|LDFLAGS = -all-static|' Makefile
+	_make ${MKFLG} LDFLAGS=-all-static
+
+	abort_if_file_not_found tools/kmod
+	copy_to_install_dir bin tools/kmod
+}
+
+# main
+retrieve "${SRC}-${VER}.${COMP}"
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup

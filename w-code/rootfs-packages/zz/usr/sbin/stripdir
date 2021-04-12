@@ -1,0 +1,89 @@
+#!/bin/sh
+
+function ahelp() {
+echo "strip binaries in the specified directory
+Syntax: 
+	stripdir [--rootfs] <DIR>
+	stripdir -h -help --help: shows this
+
+	--rootfs: perform the action in every /bin and /lib directories"
+exit $1
+}
+
+#help
+case $1 in
+	-h|-help|--help) ahelp 0 ;;
+	--rootfs) isrootfs="TRUE" ; shift 1
+esac
+
+inputdir="$@"
+location=$(dirname "$@")
+file=$(basename "$@")
+
+case $location in
+	"/") echo "in rootfs" ;; #root
+	".") location="$(pwd)" ;; #current dir
+	*)	 echo "in full path" ;; #everywhere else
+esac
+
+[ "$location" = "/" ] && location=""
+DIR="${location}/${file}"
+
+if [ "$(which yad)" ]; then #yad - gtk 
+	[ ! -e "$DIR" ] && yad --title="Error" --text="Directory does no exist:\n\n$DIR" --image="dialog-error" --button="OK:0" --center --on-top --fixed --sticky --borders="4" && exit 1
+	[ ! -d "$DIR" ] && yad --title="Error" --text="Invalid directory" --image="dialog-error" --button="OK:0" --center --on-top --fixed --sticky --borders="4" && exit 1
+else #console
+	[ ! -e "$DIR" ] && echo "stripdir error: directory does no exist: $DIR" && exit 1
+	[ ! -d "$DIR" ] && echo "stripdir error: Invalid directory" && exit 1
+fi
+
+if [ "$isrootfs" = "TRUE" ]; then
+
+	echo " * [${0}]: rootfs mode"
+	
+	find $DIR/bin $DIR/sbin $DIR/usr/bin $DIR/usr/sbin -type f |
+	while read ONEFILE; do
+		filedesc=$(file "$ONEFILE")
+		if [[ "$filedesc" == *ELF* ]] && [[ "$filedesc" == *executable* ]] ; then
+			echo "[strip] executable: ${ONEFILE##*/}" #basename $ONEFILE
+			strip --strip-unneeded "$ONEFILE"
+		fi
+	done
+	#echo
+ 
+	find $DIR/usr/lib $DIR/usr/X11R7/lib -type f -name \*.so* |
+	while read ONEFILE; do
+		filedesc="$(file "$ONEFILE")"
+		if [[ "$filedesc" == *shared?object* ]]; then
+			echo "[strip] shared lib: ${ONEFILE##*/}" #basename $ONEFILE
+			strip --strip-unneeded "$ONEFILE"
+		fi
+	done
+	#echo
+
+else ##default##: just search and strip binaries in the current directory, one lvl.
+	
+	(
+	echo "[strip] Dir: $DIR"
+	#find $DIR -maxdepth 1 -type f | sort | while read ONEFILE
+	find $DIR -type f | sort | while read ONEFILE
+	do
+		fileinfo=$(file "$ONEFILE")
+		if [[ "$fileinfo" =~ "ELF" ]]; then
+			case "$fileinfo" in
+				*exe*)
+					echo -n "[strip] executable: ${ONEFILE##*/}"; res='... OK' #basename $ONEFILE
+					strip --strip-unneeded "$ONEFILE" ##
+					[ $? -ne 0 ] && res='...ERROR' ; echo "$res"
+					;;
+				*shared*)
+					echo -n "[strip] shared lib: ${ONEFILE##*/}"; res='... OK' #basename $ONEFILE
+					strip --strip-unneeded "$ONEFILE" ##
+					[ $? -ne 0 ] && res='...ERROR' ; echo "$res"
+					;;
+			esac
+		fi
+	done
+	) #> stripdir.log
+	
+fi

@@ -1,0 +1,44 @@
+# pbuild
+
+. ../versions
+. ../../func
+. ../../build.conf
+
+URL=http://distro.ibiblio.org/fatdog/source/800
+PKG=mdview
+PKGVER=2016-06-22
+VER=$mdview_ver
+COMP=tar.bz2
+DESC="lightweight MD file viewer"
+DEPS=+gtk2+
+CAT=BuildingBlock
+DESKTOP=
+BUILD=
+CWD=$(pwd)
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+#[ -f "$DESKTOP" ] || DESKTOP=not
+#[ -z "$DEPS" ] && DEPS=
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+### SPECIAL
+build() {
+	mv mdview-fossil ${PKG}-${VER}
+	cd ${PKG}-${VER}
+	make
+	[ ! -x mdview ] && exit
+	mkdir -p $CWD/${PKG}-install/usr/bin
+	cp mdview $CWD/${PKG}-install/usr/bin
+	cd -
+}
+	
+# main
+retrieve ${PKG}-${PKGVER}.${COMP}
+extract ${PKG}-${PKGVER}.${COMP}
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT

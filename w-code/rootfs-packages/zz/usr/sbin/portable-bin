@@ -1,0 +1,84 @@
+#!/bin/sh
+#w__ 2015
+
+case $1 in 
+	-deps)
+		deps=1
+		shift
+		;;
+	-dir|-copy)
+		#current dir
+		#mkdir -p data
+		cp -fv $0 portable	
+		exit
+		;;
+esac
+
+scriptdir=${0%/*}
+scriptfile=${0##*/}
+
+case $scriptdir in
+	/usr*|/bin*|/sbin*) 
+		echo "Script located in system, exiting"
+		exit 1
+		;;
+	 .*)  DIR=${PWD}       ;;
+	 /*)  DIR=${scriptdir} ;;
+	  *)  DIR=${scriptdir} ;;
+esac
+	
+echo cd "$DIR"
+cd "$DIR"
+	
+#########################################################################
+mkdir -p appdata
+DATADIR=$DIR/appdata
+export HOME=$DATADIR
+export XDG_DATA_HOME=$HOME/.local/share
+#export XDG_CONFIG_DIRS=$HOME/etc/xdg
+export XDG_CONFIG_HOME=$HOME/.config
+export XDG_CACHE_HOME=$HOME/.cache
+export XDG_DATA_DIRS=${scriptdir}/usr/share:${scriptdir}/usr/local/share:/usr/share:/usr/local/share
+#########################################################################
+
+[ -d lib ] && LD_LIBRARY_PATH=${DIR}/lib:${LD_LIBRARY_PATH}
+[ -d usr/lib ] && LD_LIBRARY_PATH=${DIR}/usr/lib:${LD_LIBRARY_PATH}
+[ -d usr/local/lib ] && LD_LIBRARY_PATH=${DIR}/usr/local/lib:${LD_LIBRARY_PATH}
+export LD_LIBRARY_PATH=${DIR}:${LD_LIBRARY_PATH}
+
+[ -d bin ] && PATH=${DIR}/bin:${PATH}
+[ -d usr/bin ] && PATH=${DIR}/usr/bin:${PATH}
+[ -d usr/local/bin ] && PATH=${DIR}/usr/local/bin:${PATH}
+[ -d sbin ] && PATH=${DIR}/sbin:${PATH}
+[ -d usr/sbin ] && PATH=${DIR}/usr/sbin:${PATH}
+[ -d usr/games ] && PATH=${DIR}/usr/games:${PATH}
+export PATH=${DIR}:${PATH}
+
+if [ -f "${scriptfile}-bin" ] ; then USEEXE=./${scriptfile}-bin
+elif [ -f "${scriptfile}bin" ] ; then USEEXE=./${scriptfile}bin
+elif [ -f "${scriptfile}-exe" ] ; then USEEXE=./${scriptfile}-exe
+elif [ -f "${scriptfile}exe" ] ; then USEEXE=./${scriptfile}exe
+elif [ -f "$DIR/bin/$scriptfile" ] ; then USEEXE="$DIR/bin/$scriptfile"
+elif [ -f "$DIR/sbin/$scriptfile" ] ; then USEEXE="$DIR/sbin/$scriptfile"
+elif [ -f "$DIR/usr/bin/$scriptfile" ] ; then USEEXE="$DIR/usr/bin/$scriptfile"
+elif [ -f "$DIR/usr/sbin/$scriptfile" ] ; then USEEXE="$DIR/usr/sbin/$scriptfile"
+elif [ -f "$DIR/usr/local/bin/$scriptfile" ] ; then USEEXE="$DIR/usr/local/bin/$scriptfile"
+else
+	echo "ERROR: could not locate $scriptfile within the directory tree: $scriptdir"
+	exit 1
+fi
+
+echo
+echo "PATH=$PATH"
+echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+echo "HOME=$HOME"
+echo 
+
+if [ "$deps" ] ; then
+	checkdeps "$USEEXE"
+else
+	echo "Launching: $USEEXE"
+	exec "$USEEXE" "$@"
+fi
+
+### END ###

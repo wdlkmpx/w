@@ -1,0 +1,51 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+# ====================================================
+
+URL=http://ftp.gnu.org/gnu/gawk
+SRC=gawk
+PKG=awk_static
+VER=5.1.0
+COMP=tar.xz
+DESC=""
+DEPS=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='bin/awk'
+
+build() {
+	cd ${SRC}-${VER}
+
+	EXE='gawk'
+	opts="--prefix=/usr --bindir=/bin --sysconfdir=/etc
+--disable-nls
+--disable-extensions
+--disable-lint
+--without-readline
+--without-libsigsegv-prefix
+--without-mpfr" #--with-whiny-user-strftime
+	_configure
+	_make ${MKFLG} LDFLAGS=-static
+
+	abort_if_file_not_found ${EXE}
+	_strip ${EXE}
+
+	standard_make_install
+}
+
+# main
+retrieve "${SRC}-${VER}.${COMP}"
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup

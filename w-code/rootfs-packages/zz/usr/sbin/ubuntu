@@ -1,0 +1,211 @@
+#!/bin/sh
+# see help message
+
+#######################################################################
+#                             functions
+#######################################################################
+
+function help() {
+	app=${0##*/}
+	echo "
+Download debian/ubuntu packages using the web interface as the source...
+This makes downloading deb packages using any distro
+
+Syntax:
+	$app <switches> filelist <pkg>
+	$app <switches> download <pkg>
+	$app <switches> download2here <pkg>
+	$app <switches> install <pkg>
+	$app <switches> sysinstall <pkg>
+	$app <switches> installfromhere <pkg>
+	$app <switches> sysinstallfromhere <pkg>
+
+switches:
+    -debian (debian packages)
+    -ubuntu (ubuntu packages)
+	-arch <arch> (i386, amd64, etc)
+	-version <version> (trusty, xenial, etc)
+
+On Debian/Ubuntu based puppies it will automatically
+choose Version and Arch, but you can override them
+in the command line.
+"
+	exit $1
+}
+
+function filelist(){
+	downloadurl=${web}/${version}/${arch}/${package}/filelist
+	echo $downloadurl
+	htmlpage=$(wget -q -O - $downloadurl)
+	start=0
+	while read line ; do
+		case $line in 
+			*"<pre>"*) start=1 ; line=/${line#*/} ;;
+			*"</pre>"*) break ;;
+		esac
+		[ ${start} -eq 1 ] && echo ${line}
+	done <<< "${htmlpage}" > /tmp/ufl__
+	less /tmp/ufl__
+}
+
+function CheckDeb() {
+	pkg=$(ls $debdir/${package}_* 2>/dev/null)
+	[ -f "$pkg" ] && { echo "$pkg"; return 0; }
+	return 1
+}
+
+function DownloadDeb() {
+	downloadurl=${web}/${version}/${arch}/${package}/download
+	last_n_mirrors=$(( ( RANDOM % 10 )  + 1 ))
+	#get download page to stdout
+		#filter .deb to sdout
+		#filter links to stdout
+			#remove junk from links
+			#take only the last 10 mirrors in the list
+	downloadlinks=$(wget -O - $downloadurl | \
+		grep '.deb"' | grep http | grep -o '<a href=['"'"'"][^"'"'"']*['"'"'"]' | \
+			sed -e 's/^<a href=["'"'"']//' -e 's/["'"'"']$//' | \
+			tail -${last_n_mirrors})
+	#echo "$downloadlinks"
+	
+	itsok=0
+	while read ONELINK; do
+		[ "$ONELINK" = "" ] && continue
+		echo "Download link: $ONELINK"
+		filename=${ONELINK##*/}
+		if [ -f "${debdir}/${filename}" ]; then
+			if [ -s "${debdir}/${filename}" ] ; then
+				## file already exists
+				echo "* Skipping $filename (already exists)"
+				itsok=1
+				break
+			else
+				## file is empty
+				rm -f "${debdir}/${filename}"
+			fi
+		fi
+		wget --continue -O ${debdir}/${filename} $ONELINK
+		if [ $? -eq 0 ]; then 
+			itsok=1
+			 break ##successful download
+		else
+			itsok=0
+			rm -f ${debdir}/${filename}
+		fi
+	done <<< "$downloadlinks"
+	if [ $itsok -eq 0 ]; then
+		echo "* debdownload ERROR: could not download '${package}'"
+	fi
+}
+
+function InstallDeb() {
+	debfile="$(CheckDeb)"
+	[ "$SYSINSTALL" ] && sysopt='-system'
+	if [ "$debfile" ] ; then
+		install2root ${sysopt} $debfile
+	else
+		echo "Could not find $package in $debdir , trying to download..."
+		DownloadDeb ${package}
+		debfile="$(CheckDeb)"
+		if [ "$debfile" ] ; then
+			install2root ${sysopt} $debfile
+		else
+			echo "ERROR: Could not install $package"
+		fi
+	fi
+}
+
+#######################################################################
+#                               main
+#######################################################################
+
+[ $1 ] || help
+
+VERSTR="[version]"
+SETUPDIR='/root/.packages' #running pup
+if [ -f ${SETUPDIR}/DISTRO_SPECS ] ; then
+	. ${SETUPDIR}/DISTRO_SPECS
+elif [ -f /etc/DISTRO_SPECS ] ; then
+	. /etc/DISTRO_SPECS #running pup
+fi
+
+case "$DISTRO_BINARY_COMPAT" in
+  ubuntu|debian)
+	. ${SETUPDIR}/DISTRO_PET_REPOS
+	if [ -f ${SETUPDIR}/DISTRO_COMPAT_REPOS-${DISTRO_BINARY_COMPAT}-${DISTRO_COMPAT_VERSION} ] ; then
+		. ${SETUPDIR}/DISTRO_COMPAT_REPOS-${DISTRO_BINARY_COMPAT}-${DISTRO_COMPAT_VERSION}
+	fi
+	if [ -f ${SETUPDIR}/DISTRO_COMPAT_REPOS ] ; then
+		. ${SETUPDIR}/DISTRO_COMPAT_REPOS #running pup
+	fi
+	case $(uname -m) in
+	  i?86) arch=i386     ;;
+	  x86_64) arch=x86_64 ;;
+	esac
+	distro=${DISTRO_BINARY_COMPAT}
+	version=${DISTRO_FILE_PREFIX} #precise trusty
+	;;
+  *)
+	VERSTR="-version <ver>"
+	;;
+esac
+
+export debdir="/root" ##running pup
+
+# command line
+for i in $@ ; do
+  case $1 in
+    -debian) distro=debian ; shift ;;
+    -ubuntu) distro=ubuntu ; shift ;;
+	-version|-v) version=$2 ; shift 2 ;;
+	-arch) arch=$2 ; shift 2 ;;
+	-*) echo "Unknown option: $1" ; shift ;;
+	*) break ;;
+  esac
+done
+
+[ "$arch" ] && sarch=$arch
+[ ! "$arch" ] && sarch=$(uname -m)
+case $sarch in
+	x86|i3?6|32)         arch='i386'  ;;
+	x64|x86_64|amd64|64) arch='amd64' ;;
+esac
+
+case $distro in
+   ubuntu) web="http://packages.ubuntu.com" ;;
+   debian) web="http://packages.debian.org" ;;
+esac
+
+[ "$distro" ] || help 1
+[ "$arch" ] || help 1
+[ "$version" ] || help 1
+
+export package=$2
+
+case $1 in
+	filelist) filelist ${package}  ;;
+	install)  InstallDeb ${package} ;;
+	download) DownloadDeb ${package} ;;
+	download2here)
+		debdir="${PWD}"
+		DownloadDeb ${package}
+		;;
+	installfromhere)
+		debdir="${PWD}"
+		InstallDeb ${package}
+		;;
+	sysinstallfromhere)
+		debdir="${PWD}"
+		export SYSINSTALL=1
+		InstallDeb ${package}
+		;;
+	sysinstall)
+		export SYSINSTALL=1
+		InstallDeb ${package}
+		;;
+	*) 
+		help
+		;;
+esac
+
+### END ###

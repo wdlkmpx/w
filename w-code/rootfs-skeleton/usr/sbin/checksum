@@ -1,0 +1,16 @@
+#!/bin/sh
+
+for i in $@
+do
+	if ! [ -f $i ] ; then
+		continue
+	fi
+	
+	case $i in
+		*sha256*) sha256sum -c $i ;;
+		*md5sum*) md5sum    -c $i ;;
+		*sha1*)   sha1sum   -c $i ;;
+		*sha512*) sha512sum -c $i ;;
+		*) sha256sum $i > ${i}.sha256.txt ;;
+	esac
+done

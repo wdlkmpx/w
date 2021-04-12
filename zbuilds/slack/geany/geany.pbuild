@@ -1,0 +1,32 @@
+# geany
+
+. ../func
+. ../build.conf
+
+URL=http://download.geany.org/
+PKG=geany
+VER=1.32
+COMP=tar.bz2
+DESC="Light weight powerful gtk text editor and IDE"
+DEPS=+gtk+2
+CAT=Document
+DESKTOP=geany.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+build_configure $PKG $VER $LIBDIR
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

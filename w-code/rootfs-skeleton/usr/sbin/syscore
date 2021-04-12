@@ -1,0 +1,238 @@
+#!/bin/sh
+#w__ 2015
+#safe to use in console mode
+#arch compat
+
+#set -x
+
+subdir='git/w-git/w-code/rootfs-packages/zz'
+wgit='git/w-git'
+subdirgit=${wgit}/w-code/rootfs-skeleton
+
+if [ -f /etc/DISTRO_SPECS ] ; then
+
+	## PLINUX-SPECIFIC
+	#our first option is /mnt/sda1
+	sda1="$(cat /proc/mounts 2>/dev/null | grep '/mnt/sda1' | grep '/dev/sda1')"
+	sdb1="$(cat /proc/mounts 2>/dev/null | grep '/mnt/sdb1' | grep '/dev/sdb1')"
+
+	#	(1) a standard drive already mounted
+	if [ "$sda1" ] ; then
+		basedir='/mnt/sda1'
+	elif [ "$sdb1" ] ; then
+		basedir='/mnt/sdb1'
+	#	(2) PLINUX save drive properly dettected
+	elif [ -e /mnt/home ] ; then
+		basedir='/mnt/home'
+	#	(3) the current root filesystem
+	else
+		basedir='' #rootfs
+	fi
+	
+	PLINUX=1
+
+else
+
+	#OTHERDISTROS
+	basedir=${HOME}
+	subdir=${subdir}-arch
+
+fi
+
+## possibility to override: $BASEDIR can be set outside
+if [ "$BASEDIR" ] ; then
+	if [ -d "$BASEDIR" ] ; then
+		echo "Using $BASEDIR as base dir"
+		basedir=$BASEDIR
+	else
+		echo "$BASEDIR is not a valid directory"
+		exit 1
+	fi
+fi
+
+syscoredir="${basedir}/${subdir}"
+wgitdir="${basedir}/${wgit}"
+gitdir="${basedir}/${subdirgit}"
+tempdir="${basedir}/temp"
+
+#echo "${syscoredir}" ##DEBUG
+mkdir -p $syscoredir
+
+##########################################################
+
+help() {
+	echo "
+ Write to, copy from, compare and delete files from
+	TARGETDIR: $syscoredir
+ 
+ Usage: ${0##*/} <command> <file/dir>
+ Commands:
+	-write <file/dir> (write to TARGETDIR)
+	-pull <file/dir> (copy from TARGETDIR)
+	-diff <file/dir> (compare file between / & TARGETDIR)
+	-rm <file/dir> (delete file from TARGETDIR)	
+	-geany <path> open path with geany
+
+ wgit commands
+	-gitwrite <path> ((write to rootfs-skeleton)
+	-gitrm <path> (delete path from rootfs-skeleton)
+	-gitpull <path> (copy path from rootfs-skeleton to system)
+	-gitdiff <pathr> (compare path in system and rootfs-skeleton)
+	-gitgeany <path> (open path from rootfs-skeleton with geany)
+	
+	-tempwrite <path>
+	-temppull <path>
+"
+	exit
+}
+
+[ ! "$1" ] && help && exit
+
+case $1 in
+
+	-dir)
+		pcmanfm "$syscoredir"
+		exit
+		;;
+	-gitdir)
+		if [ $DISPLAY ] ; then
+			${rox} "$gitdir"
+		else
+			echo cd "$gitdir"
+		fi
+		exit
+		;;
+
+	-diff|-gitdiff)
+		file=${2}
+		dirx=${syscoredir}
+		[ "$1" = '-gitdiff' ] && dirx=${gitdir}
+		[ ! "$file" ] && echo "Syntax: ${0##*/} -diff <file>" && exit 1
+		[[ $file != /* ]] && file="/${file}"
+		diff -r "${dirx}${file}" "$file"
+		exit
+		;;
+
+	-rm|-gitrm) #delete file in syscore
+		file=${syscoredir}${2}
+		[ "$1" = '-gitrm' ] && file=${gitdir}${2}
+		args='-fv'
+		[ -d "$file" ] && args='-rfv'
+		rm $args $file
+		exit
+		;;
+
+	-pull|-copy|-gitpull|-gitpullhere|-pullhere)
+		file=${2}
+		dirx=${syscoredir}
+		case "$1" in
+			-gitpull) dirx=${gitdir} ;;
+			-gitpullhere) dirx=${gitdir} ; here=1 ;;
+			-temppull) dirx=${tempdir} ;;
+			-copyhere) here=1 ;;
+			-pullhere) here=1 ;;
+		esac
+		[[ ${file} != /* ]] && file=${PWD}/${file}
+		parentdir=${file%/*} #up one dir
+		[ ! "$parentdir" ] && parentdir='/' #might be /
+		[ "$here" ] && parentdir="$PWD"
+		cp -av --remove-destination "${dirx}/${file}" "${parentdir}/" ||
+			cp -av "${dirx}/${file}" "${parentdir}/"
+		exit
+		;;
+
+	-update)
+		fixmenus
+		if which jwm ; then jwm -reload &>/dev/null || jwm -restart ; fi
+		update-mime-database /usr/share/mime
+		gtk-update-icon-cache -i -f /usr/share/icons/hicolor 
+		fc-cache -r /usr/share/fonts/default
+		mandb -q
+		exit
+		;;
+
+	-geany|-gitgeany)
+		file=${syscoredir}${2}
+		[ "$1" = '-gitgeany' ] && file=${gitdir}${2}
+		geany "$file" &
+		exit
+		;;
+
+	-write) shift ;;
+	-gitwrite) syscoredir=${gitdir} ; shift ;;
+	-tempwrite) syscoredir=${tempdir} ; shift ;;
+
+	-scripts)
+		dirs='bin sbin usr/bin usr/sbin'
+		for dir in $dirs ; do
+			ls ${syscoredir}/${dir}/* | while read file ; do
+				file2=${file##*/}
+				echo "diff $file2 /${dir}/${file2}"
+				diff $file "/${dir}/${file2}"
+			done
+		done
+		exit
+		;;
+
+	*) help ; exit ;;
+esac
+
+#################################################
+#	WRITE MANY FILES
+#################################################
+#support for multiple input files using wildcards
+while [ "$1" ] ; do
+
+	file="$1"
+
+	if [ ! -e "$file" ]; then
+		echo "* ERROR: '${file}' does not exist"
+		break
+		#this keeps looping eternally if 'continue' and invalid filename
+	fi
+
+	case $file in
+		/*) ok=1 ;;
+		*) file=${PWD}/${file} ;;
+	esac
+
+	###################
+	# Problem:
+	# 	$file must not contain a final slash '/'
+	# The behaviour I noticed is:
+	# * syscore /a/b/c/
+	#	 result is:
+	#	 	$targedit/a/b/c/c (which is wrong)
+
+	# syscore /usr/share/themes/ZXP/
+	#`/usr/share/themes/ZXP/' -> `/mnt/sda1/PDEV/usr/share/themes/ZXP/ZXP'
+	#`/usr/share/themes/ZXP/gtk-2.0' -> `/mnt/sda1/PDEV/usr/share/themes/ZXP/ZXP/gtk-2.0'
+	#`/usr/share/themes/ZXP/gtk-2.0/gtkrc' -> `/mnt/sda1/PDEV/usr/share/themes/ZXP/ZXP/gtk-2.0/gtkrc'
+
+	case $file in */)
+		file=${file%\/}
+		#echo "$file"
+		;;
+	esac
+
+	#arch exceptions
+	if [ ! "$PLINUX" ] ; then
+		case $file in ${HOME}*) newtdir=${file//$HOME\///opt/homeconfig/} ;; esac
+	fi
+	
+	echo -
+	echo "Processing: $file"
+
+	name=${file##*/}
+	dir=${file%/*}
+	[ "$newtdir" ] && dir=${newtdir%/*}
+
+	mkdir -p "${syscoredir}${dir}"
+	cp -av --remove-destination "$file" "${syscoredir}${dir}" \
+		|| cp -afv "$file" "${syscoredir}${dir}"
+	
+	shift
+
+done
+
+### END ###

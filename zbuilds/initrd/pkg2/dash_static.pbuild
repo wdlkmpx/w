@@ -1,0 +1,47 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+source_vesions
+
+# ====================================================
+
+URL=http://gondor.apana.org.au/~herbert/dash/files
+SRC=dash
+PKG=dash_static
+VER=${dash_ver}
+COMP=tar.gz
+DESC=""
+DEPS=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='bin/dash'
+
+build() {
+	cd ${SRC}-${VER}
+
+	EXE='src/dash'
+	_configure
+	_make ${MKFLG} LDFLAGS=-static
+
+	abort_if_file_not_found ${EXE}
+	_strip ${EXE}
+
+	copy_to_install_dir bin ${EXE}
+}
+
+# main
+retrieve ${SRC}-${VER}.${COMP}
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup
+

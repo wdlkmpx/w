@@ -1,0 +1,52 @@
+# jwm
+
+. ../func
+. ../build.conf
+
+#URL=http://joewing.net/projects/jwm/snapshots/
+URL=http://www.joewing.net/projects/jwm/releases/
+PKG=jwm
+VER=2.3.2
+COMP=tar.xz
+DESC="Joes Window Manager for X"
+DEPS=+cairo,+rsvg,+libpng,+libjpeg,+xpm,+fribidi
+CAT=Desktop
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+patch_me(){
+	
+	patch -p0 < ./jwm_dock_size.patch
+	sleep 1
+}
+
+package_ext() {
+	# extra procesing for ${PKG}
+	echo "extra procesing for ${PKG}"
+	# add XSLT
+	XSLT=`find ${PKG}-${VER} -type f -name 'jwm*.xslt'`
+	[ "$XSLT" ] && echo "installing $XSLT" && \
+	install -m 0644 $XSLT ${PKG}-install/etc
+	if [ -f fixjwmrc ];then
+		install -d -m 0755 ./${PKG}-install/usr/local/bin
+		install -m 0755 fixjwmrc ./${PKG}-install/usr/local/bin
+	fi
+}
+
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+patch_me
+build_configure $PKG $VER $LIBDIR
+package_ext	
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

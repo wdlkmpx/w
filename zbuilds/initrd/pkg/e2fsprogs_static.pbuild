@@ -1,0 +1,97 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+source_libs_sh # util-linux
+
+# ====================================================
+VER=1.46.2 # 2021-03-01
+#URL=https://www.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v${VER}
+URL=https://sourceforge.net/projects/e2fsprogs/files/e2fsprogs/v${VER}
+SRC=e2fsprogs
+PKG=e2fsprogs_static
+COMP=tar.gz
+DESC=""
+DEPS=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='sbin/e2fsck'
+
+build()
+{
+	util_linux_build || exit 1
+	
+	cd ${SRC}-${VER}
+
+	#patch -N -p1 < ../static.e2fsprogs.patch
+
+	sed -i 's/64bit,//g' ./misc/mke2fs.conf.in
+
+	opts='--prefix=/usr --sbindir=/sbin --bindir=/bin --localstatedir=/var --sysconfdir=/etc
+--with-root-prefix=""
+--enable-symlink-install --enable-relative-symlinks --enable-symlink-build
+--disable-elf-shlibs
+--disable-bsd-shlibs
+--disable-libblkid
+--disable-libuuid
+--disable-uuidd
+--disable-fsck
+--disable-nls
+--disable-testio-debug
+--disable-bmap-stats
+--disable-e2initrd-helper
+--disable-fuse2fs
+--disable-rpath
+'
+	export ac_cv_lib_uuid_uuid_generate=yes
+	export ac_cv_lib_blkid_blkid_get_cache=yes
+	_configure
+	
+	# change all .so to .a
+	# remove -pthread (-musl-ld error)
+	sed -i -e 's|.so$|.a|' -e 's|.so |.a |' -e 's%-pthread%%' $(find . -type f -name Makefile)
+	# profiling: -pg
+	#  https://github.com/esnet/iperf/issues/235
+	#    ../lib/gcc/i686-linux-musl/10.2.1/../../../../i686-linux-musl/bin/ld: cannot find gcrt1.o: No such file or directory
+	#    collect2: error: ld returned 1 exit status
+	sed -i -e 's|-pg||' $(find . -type f -name Makefile)
+	# don't want some stuff
+	sed -i -e 's|tests/progs po||' -e 's|scrub||' \
+		-e '/$(MAKE) docs/d' -e '/ cd doc /d' Makefile
+
+	# problem with util/subst.c .. it's executed
+	# need to compile a working exe
+	#   Error relocating ./util/subst: __gettimeofday_time64: symbol not found
+	#   Error relocating ./util/subst: __fstat_time64: symbol not found
+	#   Error relocating ./util/subst: __futimes_time64: symbol not found
+	#   Makefile:288: recipe for target 'lib/dirpaths.h' failed
+	gcc -o util/subst util/subst.c
+	# --
+	# problem: make + standard_make_install = 2 compiles + non static e2fsck
+	# need to perform install and check static exe later..
+	set_install_dir
+	_make ${MKFLG} LDFLAGS=-static DESTDIR=${INSTALL_DIR} install-strip install-libs
+	abort_if_file_not_found e2fsck/e2fsck
+	check_static_exe e2fsck/e2fsck
+
+	fix_pkgconfig_for_toolchain ${INSTALL_DIR}/usr/lib
+	move_from_pkg_to_toolchain usr/lib
+	move_from_pkg_to_toolchain usr/include
+
+}
+
+# main
+util_linux_download
+retrieve ${SRC}-${VER}.${COMP}
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup

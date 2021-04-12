@@ -1,0 +1,1075 @@
+#!/bin/bash
+#GPL v2
+
+ver='0.1-alpha'
+
+# cpuflags
+# http://unix.stackexchange.com/questions/43539/what-do-the-flags-in-proc-cpuinfo-mean
+
+if [ -f cpuid_tool ] ; then
+	cpuid_tool=$(pwd)/cpuid_tool
+else
+	which cpuid_tool &>/dev/null && cpuid_tool=cpuid_tool
+fi
+[ -f "$CPUID_TOOL" ] && cpuid_tool=$CPUID_TOOL #override, CPUID_TOOL can be exported
+if [ -z "$cpuid_tool" ] ; then
+	echo "ERROR: need cpuid_tool"
+	exit 1
+fi
+
+VERBOSITY_LEVEL=0
+PRINTFAMILY=1
+
+for i in "$@" ; do
+	case $i in
+		-h|-help|--help)
+			echo "
+Usage:
+	$(echo $0 | sed 's|.*/||') [options]
+	
+	-v : verbose
+	-report : generate and archive report
+	
+	[dont't forget to send it to $email
+"
+			exit
+			;;
+		-v)
+			VERBOSITY_LEVEL=$((VERBOSITY_LEVEL+1))
+			if [ $VERBOSITY_LEVEL -gt 0 ] ; then
+				case $VERBOSITY_LEVEL in
+					1) PRINTCACHE=1;;
+					2) PRINTDEBUG=1;;
+				esac
+			fi
+			shift
+			;;
+		-nv)
+			unset PRINTFAMILY
+			unset PRINTCACHE
+			unset PRINTDEBUG
+			shift
+			;;
+		flags|-flags)
+			shift
+			PROCESS_FLAGS=1
+			;;
+		here|-here)
+			HERE=1
+			shift
+			;;
+		load|--load)
+			shift
+			file_to_load="$1"
+			if ! echo "$file_to_load" | grep -q '/' ; then
+				#assume file_to_load is in current directory
+				file_to_load="$(pwd)/${file_to_load}"
+			fi
+			if [ -f "$file_to_load" ] ; then
+				load_file="--load=$file_to_load"   #cpuid_tool,  no spaces in file
+				load_file2="--load $file_to_load"  #this script, no spaces in file
+				case $file_to_load in
+					*.test)
+						# Must be a libcpuid test file, which contains extra data.
+						# Create a temporary file with the needed info only.
+						grep ']=' $file_to_load > /tmp/cpuid_tmp
+						load_file="--load=/tmp/cpuid_tmp"
+						load_file2="--load /tmp/cpuid_tmp"
+						;;
+				esac
+			else
+				echo "File does not exist: $1"
+				exit 1
+			fi
+			shift
+			;;
+		tool) #run cpuid_tool
+			shift
+			$cpuid_tool ${load_file} $@
+			exit
+			;;
+		####
+		report|-report|--report)
+			export REPORT=1
+			#export CPUID_TOOL=$cpuid_tool
+			dir="$($cpuid_tool $load_file --codename | sed 's| |_|g')-$($cpuid_tool $load_file --brandstr | sed 's|.* ||')"
+			self=$(echo "$0" | sed 's|.*/||')
+			if [ -f "$self" ] ; then
+				myself=$(pwd)/$self
+			else
+				myself=$self
+				if [ "$HERE" != "1" ] ; then
+					if [ -d "$HOME" ] ; then
+						cd "$HOME"
+					else
+						cd /tmp
+					fi
+				fi
+			fi
+			#--
+			echo "--------------------------------------------------------"
+			echo "       We're going to generate a report"
+			echo "--------------------------------------------------------"
+			echo "The processor could be completely unknown"
+			echo "So it would be nice if you write a description below"
+			echo
+			echo "In a few words describe all you know about your processor"
+			echo "(information such as model is quite valuable)"
+			echo
+			echo -n "Descripion: "; read zz
+			echo "$zz" > /tmp/zz_description.txt
+			#--
+			mkdir -p "$dir"
+			cd "$dir"
+			if [ -f "$file_to_load" ] ; then
+				$cpuid_tool ${load_file} --outfile=report.txt --report --verbose
+			else
+				$cpuid_tool
+			fi
+			$cpuid_tool ${load_file} -vvv --report > report.verbose.txt 2>&1
+			PRINTFAMILY=1
+			PRINTCACHE=1
+			$myself ${load_file2} > info.txt
+			$myself ${load_file2} -v -v > info.verbose.txt
+			if [ ! -f "$file_to_load" ] ; then
+				if which lscpu 1>/dev/null 2>&1 ; then
+					lscpu > lscpu.txt
+				fi
+				if which dmidecode 1>/dev/null 2>&1 ; then
+					dmidecode -t processor > dmidecode.txt
+				fi
+				cat /proc/cpuinfo > proc.cpuinfo.txt
+			fi
+			cp /tmp/zz_description.txt .
+			if [ "$HERE" != "1" ] ; then
+				cd ..
+				tar -zcf "${dir}.tar.gz" "${dir}"
+				rm -rf "$dir"
+				echo "Your report is (or should be) in:"
+				echo "	$(pwd)/${dir}.tar.gz"
+				echo
+				echo "Don't forget to send it to $email"
+			fi
+			exit
+			;;
+		##
+		test)
+			shift
+			if [ -f create_test.py ] ; then
+				create_test_py="$(pwd)/create_test.py"
+			elif [ -f /usr/local/cpuinfo/create_test.py ] ; then
+				create_test_py="/usr/local/cpuinfo/create_test.py"
+			else
+				echo "Need create_test.py"
+				exit 1
+			fi
+			if [ ! -f raw.txt -a ! -f report.txt ] ; then
+				echo "raw.txt or report.txt missing"
+				exit 1
+			fi
+			rfile="zzz.test"
+			[ "$1" ] && rfile="${1}.test"
+			${create_test_py} raw.txt report.txt > ${rfile}
+			exit
+			;;
+		make)
+			make clean && make && install -vm 0755 cpuid_tool/cpuid_tool /usr/bin
+			install -vm 0755 libcpuid/.libs/libcpuid.* /usr/lib
+			mkdir -p /usr/include/libcpuid
+			install -vm 0755 libcpuid/libcpuid*.h /usr/include/libcpuid
+			exit
+			;;
+		debug)
+			$cpuid_tool ${load_file} -vvv --report 2>&1 | less
+			#cpuinfo tool ${load_file2} -vvv --report 2>&1 | less
+			exit
+			;;
+		debuglocal)
+			cpuinfo load raw.txt tool -vvv --report 2>&1 | less
+			exit
+			;;
+		pet|-pet)
+			#puppy linux
+			shift
+			if [ "$1" ] ; then
+				pkg=$1
+			else
+				pkg=$(echo "$0" | sed -e 's|.*/||')
+			fi
+			mkdir -p ${pkg}-${ver}
+			mkdir -p ${pkg}-${ver}/usr/bin
+			mkdir -p ${pkg}-${ver}/usr/sbin
+			cpuidt=$(which cpuid_tool 2>/dev/null)
+			cpuidt64=$(which cpuid_tool64 2>/dev/null)
+			[ -f "$cpuidt" ] && cp -f $cpuidt ${pkg}-${ver}/usr/bin
+			[ -f "$cpuidt64" ] && cp -f $cpuidt64 ${pkg}-${ver}/usr/bin
+			cp -f $0 ${pkg}-${ver}/usr/sbin
+			dir2pet -g -s ${pkg}-${ver}
+			exit
+			;;
+	esac
+done
+
+#####################################################################
+#							FUNCTIONS
+#####################################################################
+
+cache_str() {
+	case $1 in
+		64) echo "64 KB" ;;
+		128) echo "128 KB" ;;
+		256) echo "256 KB" ;;
+		512) echo "512 KB" ;;
+		1024) echo "1 MB" ;;
+		1536) echo "1.5 MB" ;;
+		2048) echo "2 MB" ;;
+		3072) echo "3 MB" ;;
+		4096) echo "4 MB" ;;
+		6144) echo "6 MB" ;;
+		8192) echo "8 MB" ;;
+		12288) echo "12 MB" ;;
+	esac
+}
+
+get_nword_from_brandstr() {
+	local x=$1
+	local c=1
+	for w in $brandstr ; do
+		if [ $c -eq $x ] ; then
+			echo "$w"
+			break
+		fi
+		c=$((c+1))
+	done
+}
+
+print_hex() {
+	local num=$1
+	if [ $num -gt 9 ] ; then
+		printf "%d (%X)\n" "$num" "$num"
+	else
+		printf "%d\n" "$num"
+	fi
+}
+
+cpu_feature() {
+	local res
+	case $1 in
+		fpu)   CPU_FEATURE_FPU=1 ; res="fpu: Onboard FPU (floating point support)" ;;
+		vme)   CPU_FEATURE_VME=1 ; res="vme: Virtual Mode Extensions (8086 mode)" ;;
+		de)    CPU_FEATURE_DE=1  ; res="de: Debugging Extensions (CR4.DE)" ;;
+		pse)   CPU_FEATURE_PSE=1 ; res="pse: Page Size Extensions (4MB memory pages)" ;;
+		tsc)   CPU_FEATURE_TSC=1 ; res="tsc: Time Stamp Counter (RDTSC)" ;;
+		msr)   CPU_FEATURE_MSR=1 ; res="msr: Model-Specific Registers (RDMSR, WRMSR)" ;;
+		pae)   CPU_FEATURE_PAE=1 ; res="pae: Physical Address Extensions (support for more than 4GB of RAM)" ;;
+		mce)   CPU_FEATURE_MCE=1 ; res="mce: Machine Check Exception" ;;
+		cx8)   CPU_FEATURE_CX8=1 ; res="cx8: CMPXCHG8 instruction (64-bit compare-and-swap)" ;;
+		apic)  CPU_FEATURE_APIC=1 ; res="apic: Onboard APIC" ;;
+		mtrr)  CPU_FEATURE_MTRR=1 ; res="mtrr: Memory Type Range Registers" ;;
+		sep)   CPU_FEATURE_SEP=1 ; res="sep: SYSENTER/SYSEXIT" ;;
+		pge)   CPU_FEATURE_PGE=1 ; res="pge: Page Global Enable (global bit in PDEs and PTEs)" ;;
+		mca)   CPU_FEATURE_MCA=1 ; res="mca: Machine Check Architecture" ;;
+		cmov)  CPU_FEATURE_CMOV=1; res="cmov: CMOV instructions (conditional move) (also FCMOV)" ;;
+		pat)   CPU_FEATURE_PAT=1 ; res="pat: Page Attribute Table" ;;
+		pse36) CPU_FEATURE_PSE36=1 ; res="pse36: 36-bit PSEs (huge pages)" ;;
+		pn)    CPU_FEATURE_PN=1 ; res="pn: Processor serial number" ;;
+	clflush)   CPU_FEATURE_CLFLUSH=1 ; res="clflush: Cache Line Flush instruction" ;;
+		dts)   CPU_FEATURE_DTS=1 ; res="dts: Debug Store (buffer for debugging and profiling instructions)" ;;
+		acpi)  CPU_FEATURE_ACPI=1; res="acpi: ACPI via MSR (temperature monitoring and clock speed modulation)" ;;
+		mmx)   CPU_FEATURE_MMX=1 ; res="mmx: Multimedia Extensions" ;;
+		fxsr)  CPU_FEATURE_FXSR=1; res="fxsr: FXSAVE/FXRSTOR, CR4.OSFXSR" ;;
+		sse)   CPU_FEATURE_SSE=1 ; res="sse: Streaming SIMD extensions" ;;
+		sse2)  CPU_FEATURE_SSE2=1; res="sse2: Streaming SIMD extensions 2" ;;
+		ss)    CPU_FEATURE_SS=1 ; res="ss: CPU self snoop" ;;
+		ht)    CPU_FEATURE_HT=1 ; res="ht: Hyper-Threading" ;;
+		tm)    CPU_FEATURE_TM=1 ; res="tm: Automatic clock control (Thermal Monitor)" ;;
+		ia64)  CPU_FEATURE_IA64=1 ; res="ia64: Intel Itanium Architecture 64-bit (not to be confused with Intel's 64-bit x86 architecture with flag x86-64 or 'AMD64' bit indicated by flag lm)" ;;
+		pbe)   CPU_FEATURE_PBE=1 ; res="pbe: Pending Break Enable (PBE# pin) wakeup support" ;;
+		pni)   CPU_FEATURE_PNI=1 ; res="pni: SSE-3 (“Prescott New Instructions”)" ;;
+		pclmul)CPU_FEATURE_PCLMUL=1 ; res="pclmulqdq: Perform a Carry-Less Multiplication of Quadword instruction — accelerator for GCM)" ;;
+	pclmulqdq) CPU_FEATURE_PCLMUL=1 ; res="pclmulqdq: Perform a Carry-Less Multiplication of Quadword instruction — accelerator for GCM)" ;;
+		dts64) CPU_FEATURE_DTS64=1 ; res="dtes64: 64-bit Debug Store" ;;
+		dtes64)CPU_FEATURE_DTS64=1 ; res="dtes64: 64-bit Debug Store" ;;
+		monitor) CPU_FEATURE_MONITOR=1 ; res="monitor: Monitor/Mwait support (Intel SSE3 supplements)" ;;
+		ds_cpl)CPU_FEATURE_DS_CPL=1 ; res="ds_cpl: CPL Qual. Debug Store" ;;
+		vmx)   CPU_FEATURE_VMX=1 ; res="vmx: Hardware virtualization: Intel VMX" ;;
+		smx)   CPU_FEATURE_SMX=1 ; res="smx: Safer mode: TXT (TPM support)" ;;
+		est)   CPU_FEATURE_EST=1 ; res="est: Enhanced SpeedStep" ;;
+		tm2)   CPU_FEATURE_TM2=1 ; res="tm2: Thermal Monitor 2" ;;
+		ssse3) CPU_FEATURE_SSSE3=1 ; res="ssse3: Supplemental SSE-3" ;;
+		cid)   CPU_FEATURE_CID=1 ; res="cid: Context ID" ;;
+		cx16)  CPU_FEATURE_CX16=1 ; res="cx16: CMPXCHG16B" ;;
+		xtpr)  CPU_FEATURE_XTPR=1 ; res="xtpr: Send Task Priority Messages" ;;
+		pdcm)  CPU_FEATURE_PDCM=1 ; res="pdcm: Performance Capabilities" ;;
+		dca)   CPU_FEATURE_DCA=1 ; res="dca: Direct Cache Access" ;;
+		sse4_1)  CPU_FEATURE_SSE4_1=1 ; res="sse4_1: SSE-4.1" ;;
+		sse4_2)  CPU_FEATURE_SSE4_2=1 ; res="sse4_2: SSE-4.2" ;;
+		syscall) CPU_FEATURE_SYSCALL=1 ; res="syscall: SYSCALL (Fast System Call) and SYSRET (Return From Fast System Call)" ;;
+		#xd)    CPU_FEATURE_NX=1 ; res="xd: Execute Disable bit" ;;
+		x2apic) CPU_FEATURE_X2APIC=1 ; res="x2apic: x2APIC" ;;
+		movbe)  CPU_FEATURE_MOVBE=1 ; res="movbe: Move Data After Swapping Bytes instruction" ;;
+		popcnt) CPU_FEATURE_POPCNT=1 ; res="popcnt: Return the Count of Number of Bits Set to 1 instruction (Hamming weight, i.e. bit count)" ;;
+		aes)    CPU_FEATURE_AES=1 ; res="aes/aes-ni: Advanced Encryption Standard (New Instructions)" ;;
+		xsave)  CPU_FEATURE_XSAVE=1 ; res="xsave: Save Processor Extended States: also provides XGETBY,XRSTOR,XSETBY" ;;
+		osxsave) CPU_FEATURE_OSXSAVE=1 ; res="osxsave: XSAVE enabled in the OS" ;;
+		avx)    CPU_FEATURE_AVX=1 ; res="avx: Advanced Vector Extensions" ;;
+		mmxext) CPU_FEATURE_MMXEXT=1 ; res="mmxext: AMD MMX extensions" ;;
+		3dnow)  CPU_FEATURE_3DNOW=1 ; res="3dnow: 3DNow!" ;;
+		3dnowext) CPU_FEATURE_3DNOWEXT=1 ; res="3dnowext: AMD 3DNow! extensions" ;;
+		nx)     CPU_FEATURE_NX=1 ; res="nx: Virus Protection / Execute Disable bit" ;;
+		xd)     CPU_FEATURE_NX=1 ; res="xd: Virus Protection / Execute Disable bit" ;;
+		fxsr_opt) CPU_FEATURE_FXSR_OPT=1 ; res="fxsr_opt: FXSAVE/FXRSTOR optimizations" ;;
+		rdtscp) CPU_FEATURE_RDTSCP=1 ; res="rdtscp: RDTSCP" ;;
+		lm)     CPU_FEATURE_LM=1 ; res="lm: Long Mode (x86-64: amd64, also known as Intel 64, i.e. 64-bit capable)" ;;
+		lahf_lm)CPU_FEATURE_LAHF_LM=1 ; res="lahf_lm: Load AH from Flags (LAHF) and Store AH into Flags (SAHF) in long mode" ;;
+	cmp_legacy) CPU_FEATURE_CMP_LEGACY=1 ; res="cmp_legacy: If yes HyperThreading not valid" ;;
+		svm)    CPU_FEATURE_SVM=1 ; res="svm: Secure virtual machine" ;;
+		sse4a)  CPU_FEATURE_SSE4A=1 ; res="sse4a: SSE-4A" ;;
+	misalignsse)CPU_FEATURE_MISALIGNSSE=1 ; res="misalignsse: Misaligned SSE mode" ;;
+		abm)    CPU_FEATURE_ABM=1 ; res="abm: Advanced bit manipulation" ;;
+	3dnowprefetch) CPU_FEATURE_3DNOWPREFETCH=1 ; res="3dnowprefetch: 3DNow prefetch instructions" ;;
+		osvw)   CPU_FEATURE_OSVW=1 ; res="osvw: OS Visible Workaround" ;;
+		ibs)    CPU_FEATURE_IBS=1 ; res="ibs: Instruction Based Sampling" ;;
+		sse5)   CPU_FEATURE_SSE5=1 ; res="" ;;
+		skinit) CPU_FEATURE_SKINIT=1 ; res="skinit: SKINIT/STGI instructions" ;;
+		wdt)    CPU_FEATURE_WDT=1 ; res="wdt: Watchdog timer" ;;
+		ts)     CPU_FEATURE_TS=1 ; res="" ;;
+		fid)    CPU_FEATURE_FID=1 ; res="" ;;
+		vid)    CPU_FEATURE_VID=1 ; res="" ;;
+		ttp)    CPU_FEATURE_TTP=1 ; res="" ;;
+		tm_amd) CPU_FEATURE_TM_AMD=1 ; res="" ;;
+		stc)    CPU_FEATURE_STC=1 ; res="" ;;
+	100mhzsteps)CPU_FEATURE_100MHZSTEPS=1 ; res="" ;;
+	hwpstate)   CPU_FEATURE_HWPSTATE=1 ; res="" ;;
+	constant_tsc) CPU_FEATURE_CONSTANT_TSC=1 ; res="constant_tsc: TSC ticks at a constant rate" ;;
+		xop)    CPU_FEATURE_XOP=1 ; res="xop: extended AVX instructions" ;;
+		fma3)   CPU_FEATURE_FMA3=1 ; res="" ;;
+		fma4)   CPU_FEATURE_FMA4=1 ; res="fma4: 4 operands MAC instructions" ;;
+		tbm)    CPU_FEATURE_TBM=1 ; res="tbm: trailing bit manipulations" ;;
+		f16c)   CPU_FEATURE_F16C=1 ; res="f16c: 16-bit fp conversions" ;;
+		rdrand) CPU_FEATURE_RDRAND=1 ; res="rdrand: The RDRAND instruction" ;;
+		cpb)    CPU_FEATURE_CPB=1 ; res="cpb: AMD Core Performance Boost" ;;
+	aperfmperf) CPU_FEATURE_APERFMPERF=1 ; res="aperfmperf: APERFMPERF" ;;
+		pfi)    CPU_FEATURE_PFI=1 ; res="" ;;
+		pa)     CPU_FEATURE_PA=1 ; res="" ;;
+		avx2)   CPU_FEATURE_AVX2=1 ; res="avx2: AVX2 instructions" ;;
+		bmi1)   CPU_FEATURE_BMI1=1 ; res="bmi1: 1st group bit manipulation extensions" ;;
+		bmi2)   CPU_FEATURE_BMI2=1 ; res="bmi2: 2nd group bit manipulation extensions" ;;
+	esac
+	if [ "$res" = "" ] ; then
+		echo "${1}: --"
+	else
+		echo "$res"
+	fi
+}
+
+if [ "$PROCESS_FLAGS" = "1" ] ; then
+	for f in $@ ; do
+		cpu_feature $f
+	done
+	exit
+fi
+
+
+#####################################################################
+#							GET VARIABLES
+#####################################################################
+
+if [ "$cpuid_tool" ] ; then
+	$cpuid_tool ${load_file} \
+	  --cpuid --vendorstr --vendorid --brandstr --family --model \
+	  --stepping --extfamily --extmodel --cores --logical --total-cpus \
+	  --l1d-cache --l1i-cache --cache --l2-cache --l3-cache --l1d-assoc \
+	  --l2-assoc --l3-assoc --l1d-cacheline --l2-cacheline --l3-cacheline \
+	  --codename --flags --clock --clock-os --sse-size > /tmp/cpuid_tool_output
+		#  --brandcode --modelcode > /tmp/cpuid_tool_output
+	x=0
+	while read line ; do
+		x=$((x+1))
+		case $x in
+			1) cpuid="$line" ;;
+			2) vendorstr="$line" ;;
+			3) vendorid="$line" ;;
+			4) brandstr="$line" ;;
+			5) family="$line" ;;
+			6) model="$line" ;;
+			7) stepping="$line" ;;
+			8) extfamily="$line" ;;
+			9) extmodel="$line" ;;
+			10) cores="$line" ;;
+			11) logical="$line" ;;
+			12) total_cpus="$line" ;;
+			13) l1d_cache="$line" ;;
+			14) l1i_cache="$line" ;;
+			15) cache="$line" ;;
+			16) l2_cache="$line" ;;
+			17) l3_cache="$line" ;;
+			18) l1d_assoc="$line" ;;
+			19) l2_assoc="$line" ;;
+			20) l3_assoc="$line" ;;
+			21) l1d_cacheline="$line" ;;
+			22) l2_cacheline="$line" ;;
+			23) l3_cacheline="$line" ;;
+			24) codename="$line" ;;
+			25) flags="$line" ;;
+			26) clock="$line" ;;
+			27) clock_os="$line" ;;
+			28) sse_size="$line" ;;
+			29) brandcode="$line" ;;
+			30) modelcode="$line" ;;
+		esac
+	done < /tmp/cpuid_tool_output
+else
+	while IFS=":" read field value
+	do
+		field=$(echo $field)
+		value=$(echo $value)
+		case $field in
+			processor) cpuid="$value" ;;
+			vendor_id) vendorstr="$value" ;;
+			"cpu family") family="$value" ;;
+			model) model="$value" ;;
+			"model name") ;;
+			stepping) stepping="$value" ;;
+			"cpu MHz") ;;
+			"cache size") ;;
+			"physical id") ;;
+			siblings) ;;
+			"core id") ;;
+			"cpu cores") ;;
+			apicid) ;;
+			"initial apicid") ;;
+			fdiv_bug) ;;
+			f00f_bug) ;;
+			coma_bug) ;;
+			fpu) ;;
+			fpu_exception) ;;
+			"cpuid level") ;;
+			wp) ;;
+			flags) flags="$value" ;;
+			bugs) ;;
+			bogomips) ;;
+			"clflush size") ;;
+			cache_alignment) ;;
+			"address sizes") ;;
+			"power management") ;;
+		esac
+	done < /proc/cpuinfo
+fi
+
+if [ "$PRINTDEBUG" = "1" ] ; then
+	echo "-----------------------------"
+	echo "cpuid=$cpuid"
+	echo "vendorstr=$vendorstr"
+	echo "vendorid=$vendorid"
+	echo "brandstr=$brandstr"
+	echo "family=$family"
+	echo "model=$model"
+	echo "stepping=$stepping"
+	echo "extfamily=$extfamily"
+	echo "extmodel=$extmodel"
+	echo "cores=$cores"
+	echo "logical=$logical"
+	echo "total_cpus=$total_cpus"
+	echo "l1d_cache=$l1d_cache"
+	echo "l1i_cache=$l1i_cache"
+	echo "cache=$cache"
+	echo "l2_cache=$l2_cache"
+	echo "l3_cache=$l3_cache"
+	echo "l1d_assoc=$l1d_assoc"
+	echo "l2_assoc=$l2_assoc"
+	echo "l3_assoc=$l3_assoc"
+	echo "l1d_cacheline=$l1d_cacheline"
+	echo "l2_cacheline=$l2_cacheline"
+	echo "l3_cacheline=$l3_cacheline"
+	echo "codename=$codename"
+	echo "flags=$flags"
+	echo "clock=$clock"
+	echo "clock_os=$clock_os"
+	echo "sse_size=$sse_size"
+	echo "brandcode=$brandcode"
+	echo "modelcode=$modelcode"
+	echo "-----------------------------"
+	echo
+fi
+
+## set flags for cpu features
+for flag in $flags ; do
+	cpu_feature $flag >/dev/null
+done
+
+## get speed from $brandstr
+for zz in $brandstr ; do
+	cpu_speed="$zz"
+done
+
+#get_nword_from_brandstr 1
+
+#####################################################################
+#					socket, FSB by Code Name & brandstr
+#####################################################################
+
+#search_table
+#   1      2        3          4         5        6      7      8          9      10         11      12  13   14     15      16
+# zfamily|zmodel|zstepping|zextfamily|zextmodel|zhint|zflags|zl2cache|zl3cache|ztechnology|zsocket|zFSB|zBF|zname|zrevision|zurl
+
+# family model stepping extfamily extmodel ncores threads/logical_cpus \
+#  tot_logical_cpus l1cache l1icache ..
+
+# family model stepping extfamily extmodel ncores l2cache l3cache
+# brancode modelcode name
+
+case $codename in
+
+	###################################################################
+	#						PENTIUM 4
+	###################################################################
+
+	"Pentium 4 (Willamette)")
+		# http://www.cpu-world.com/CPUs/Pentium_4/TYPE-Desktop Pentium 4 Willamette.html
+		# this is tricky
+		technology=180
+		socketX="PGA 423|478"
+		FSB="400 MHz"
+		BF=100
+		case $brandstr in
+			*"1300MHz"*) socketX="PGA 423" ;;
+			*"1400MHz"*) socketX="PGA 423" ;;
+			*"1500MHz"*) socketX="PGA 423" ;;
+			*"1600MHz"*) socketX="PGA 423" ;;
+			*"1700MHz"*) socketX="PGA 423" ;;
+			*"1.40GHz"*) socketX="PGA 478" ;;
+			*"1.50GHz"*) socketX="PGA 478" ;;
+			*"1.60GHz"*) socketX="PGA 478" ;;
+			*"1.70GHz"*) socketX="PGA 478" ;;
+			*) socketX="PGA 478" ;; # gross assumption
+		esac
+		;;
+
+	"Pentium 4 (Northwood)")
+		# http://www.cpu-world.com/CPUs/Pentium_4/TYPE-Desktop Pentium 4 Northwood.html
+		# this is tricky
+		technology=130
+		socketX="PGA 478"
+		case $brandstr in
+			*"1.60GHz"*) FSB="400 MHz" ; BF=100 ;;
+			*"1.70GHz"*) FSB="400 MHz" ; BF=100 ;;
+			*"1.80GHz"*) FSB="400 MHz" ; BF=100 ;;
+			*"1.90GHz"*) FSB="400 MHz" ; BF=100 ;;
+			*"2.00GHz"*) FSB="400 MHz" ; BF=100 ;;
+			*"2.20GHz"*) FSB="400 MHz" ; BF=100 ;;
+			*"2.26GHz"*) FSB="533 MHz" ; BF=133 ;;
+			#*"*2.40GHz"*)
+			#	case $stepping in
+			#		4) FSB="533 MHz" ;;
+			#		9) FSB="400/800 MHz" ;; #trouble
+			#		*) FSB="533 MHz" ;; #being random
+			#	esac
+			#	;;
+			*"2.50GHz"*) FSB="400 MHz" ;;
+			*"2.53GHz"*) FSB="533 MHz" ;;
+			#*"2.60GHz"*) FSB="400|800 MHz" ;; #trouble
+			*"2.66GHz"*)
+				FSB="533 MHz"
+				case $stepping in
+					7) rev="C1 (QNE2, SL6DX, SL6EH, SL6S3, SL6SK)" ;;
+					9) rev="D1 (SL6PE, SL6QA)" ;;
+				esac
+				;;
+			#*"2.80GHz"*)
+			#	case $stepping in
+			#		#9) FSB="400 MHz" ;;
+			#		#9) FSB="800 MHz" ;;
+			#		*) FSB="533 MHz" ;; #being random
+			#	esac
+			#	;;
+			*"3.00GHz"*)
+				case $stepping in
+					7) FSB="400 MHz" ; rev="C1 (QRA2, SL6YH)" ;;
+					5) FSB="800 MHz" ; rev="M0 (SL7BK)" ;;
+					9) FSB="800 MHz" ; rev="D1 (QWN3, SL6WK, SL6WU, SL78Z)" ;;
+				esac
+				;;
+			*"3.06GHz"*) FSB="533 MHz" ;;
+			*"3.20GHz"*) FSB="800 MHz" ;;
+			*"3.40GHz"*) FSB="800 MHz" ;;
+		esac
+		;;
+
+	"Pentium 4 (Prescott)") ## TO DO ##
+		# http://www.cpu-world.com/CPUs/Pentium_4/TYPE-Desktop Pentium 4 Prescott.html
+		# this is very tricky
+		technology=90
+		case $brandstr in
+			*"2.40GHz"*) #2.4A
+				FSB="533 MHz" ; BF=133 ; socketX="PGA 478" ;;
+			*"2.66GHz"*)
+				## 3 modoels 2.66A 505/505J 506
+				# http://www.cpu-world.com/CPUs/Pentium_4/Intel-Pentium 4 2.66A GHz - RK80546PE0671M (BX80546PE2667E).html
+				# http://www.cpu-world.com/CPUs/Pentium_4/Intel-Pentium 4 505-505J 2.66 GHz - JM80547PE0671M (BX80547PE2667E - BX80547PE2667EJ).html
+				# http://www.cpu-world.com/CPUs/Pentium_4/Intel-Pentium 4 506 2.66 GHz - JM80547PE0671MN - HH80547PE0671MN (BX80547PE2667EN).html
+				FSB="533 MHz" ; BF=133
+				name="Pentium 4 2.66A"
+				if [ "$CPU_FEATURE_NX" ] ; then #NX / XD / Execute disable bit
+					socketX="LGA 775" ; name="Pentium 4 505/505J"
+				fi
+				if [ "$CPU_FEATURE_LM" ] ; then #Intel 64
+					socketX="LGA 775" ; name="Pentium 4 506"
+				fi
+				;;
+			*"2.80GHz"*)
+				FSB="533 MHz"
+				;;
+			*"3.06GHz"*) #done
+				#there 3 models with this speed: 519/519J / 519K / 524
+				name="Intel Pentium 4 524"
+				FSB="533 MHz" ; BF=133 ; socketX="LGA 775"
+				case $stepping in 9) rev="G1 (SL8ZZ, SL9CA)" ;; esac
+				;;
+			*"3.20GHz"*)
+				#there are 4 models with this speed: 3.2GHz 540/540J 541 640
+				#http://www.cpu-world.com/CPUs/Pentium_4/Intel-Pentium 4 3.2 GHz - RK80546PG0881M (BX80546PG3200E).html
+				#http://www.cpu-world.com/CPUs/Pentium_4/Intel-Pentium 4 540-540J 3.2 GHz - JM80547PG0881M - HH80547PG0881M (BX80547PG3200E).html
+				#http://www.cpu-world.com/CPUs/Pentium_4/Intel-Pentium 4 541 3.2 GHz - JM80547PG0881MM - HH80547PG0881MM (BX80547PG3200EK).html
+				#http://www.cpu-world.com/CPUs/Pentium_4/Intel-Pentium 4 640 3.2 GHz - JM80547PG0882MM - HH80547PG0882MM (BX80547PG3200F).html
+				FSB="800 Mhz" ; BF=200
+				socketX="PGA 478"
+				name="Intel Pentium 4 3.2GHz"
+				if [ "$CPU_FEATURE_TM2" ] ; then
+					socketX="LGA 775" ; name="Intel Pentium 4 540" #Thermal Monitor 2
+				fi
+				if [ "$CPU_FEATURE_LM" ] ; then
+					socketX="LGA 775" ; name="Intel Pentium 4 541" #64 bits
+				fi
+				if [ "$l2_cache" = "2048" ] ; then
+					socketX="LGA 775" ; name="Intel Pentium 4 640" #2MB cache
+				fi
+				;;
+		esac
+		;;
+
+	"Pentium 4 (Cedar Mill)") #done
+		# http://www.cpu-world.com/CPUs/Pentium_4/TYPE-Desktop Pentium 4 Cedar Mill.html
+		technology=65
+		socketX="LGA 775"
+		FSB="800 MHz"
+		BF=200
+		;;
+
+	###################################################################
+	#						P4 CELERON
+	###################################################################
+
+	"P-4 Celeron"*)
+		#"P-4 Celeron (Willamette-128)") #done
+		#"P-4 Celeron (Northwood-128)") #done
+		# http://www.cpu-world.com/CPUs/Celeron/TYPE-Celeron (Willamette).html
+		# http://www.cpu-world.com/CPUs/Celeron/TYPE-Celeron (Northwood).html
+		search_table="
+#willamette
+15|1| |15|2|       ||||180|PGA 478|400 MHz|100|||
+15|1|3|15|2|1.70GHz||||180|PGA 478|400 MHz|100||E0 (SL68C, SL69Z)|http://www.cpu-world.com/cgi-bin/CPUID.pl?CPUID=18706
+15|1|3|15|2|1.80GHz||||180|PGA 478|400 MHz|100||E0 (QJT4, SL68D, SL6A2)|
+15|1|3|15|2|1.90GHz||||180|PGA 478|400 MHz|100||E0 (QJT3, SL68E)|
+#northwood
+15|2| |15|2|       ||||130|PGA 478|400 MHz|100|||
+15|2|7|15|2|1.60GHz||||180|PGA 478|400 MHz|100||SL6K8|http://www.cpu-world.com/cgi-bin/CPUID.pl?CPUID=35477
+15|2|7|15|2|2.40GHz||||130|PGA 478|400 MHz|100||C1 (QWV8, SL6V2, SL6XG)|
+15|2|9|15|2|2.40GHz||||130|PGA 478|400 MHz|100||D1 (QVW5, SL6VU, SL6W4)|
+15|2|9|15|2|2.50GHz||||130|PGA 478|400 MHz|100||D1 (SL6ZY, SL72B)|http://www.cpu-world.com/CPUs/Celeron/Intel-Celeron%202500%20-%20RK80532RC060128%20(BX80532RC2500B).html
+"
+		;;
+
+	"P-4 Celeron D (Prescott-256)") #done
+		# http://www.cpu-world.com/CPUs/Celeron_D/TYPE-Celeron D (Prescott).html
+		technology=90
+		socketX="PGA 478 | LGA 775"
+		FSB="533 MHz"
+		BF=133
+		case $brandstr in
+			*"2.13GHz"*) socketX="PGA 478" ; name="Celeron D 310" ;;
+			*"2.26GHz"*) socketX="PGA 478" ; name="Celeron D 315" ;;
+			*"2.40GHz"*)
+				socketX="PGA 478" ; name="Celeron D 320"
+				if [ "$CPU_FEATURE_NX" ] ; then #NX / XD / Execute disable bit
+					socketX="LGA 775" ; name="Celeron D 320J"
+				fi
+				;;
+			*"2.53GHz"*)
+				socketX="PGA 478" ; name="Celeron D 325"
+				if [ "$CPU_FEATURE_NX" ] ; then #NX / XD / Execute disable bit
+					socketX="LGA 775" ; name="Celeron D 325J"
+				fi
+				if [ "$CPU_FEATURE_LM" ] ; then #Intel 64
+					socketX="LGA 775" ; name="Celeron D 326"
+				fi
+				;;
+			*"2.66GHz"*)
+				name="Celeron D 330"
+				socketX="PGA 478"
+				if [ "$CPU_FEATURE_NX" ] ; then #NX / XD / Execute disable bit
+					socketX="LGA 775" ; name="Celeron D 330J"
+				fi
+				if [ "$CPU_FEATURE_LM" ] ; then #Intel 64
+					socketX="LGA 775" ; name="Celeron D 331"
+				fi
+				;;
+			*"3.33GHz") socketX="LGA 775" ; name="Celeron D 315" ;;
+			*"3.46GHz") socketX="LGA 775" ; name="Celeron D" ;;
+		esac
+		;;
+
+	"P-4 Celeron D (Cedar Mill-512)") #done
+		# http://www.cpu-world.com/CPUs/Celeron_D/TYPE-Celeron%20D%20(Cedar%20Mill).html
+		technology=65
+		socketX="LGA 775"
+		FSB="533 MHz"
+		BF=133
+		;;
+
+	###################################################################
+	#						PENTIUM D
+	###################################################################
+	# https://en.wikipedia.org/wiki/List_of_Intel_Pentium_D_microprocessors
+
+	"Pentium D (SmithField)") #done
+		# http://www.cpu-world.com/CPUs/Pentium_D/TYPE-Pentium D (Smithfield).html
+		technology=90
+		socketX="LGA 775"
+		case $brandstr in
+			*"2.66GHz"*) FSB="533 MHz" ; BF=133 ; name="Intel Pentium D 805" ;;
+			*"2.80GHz"*) FSB="800 MHz" ; BF=200 ; name="Intel Pentium D 820" ;;
+			*"3.00GHz"*) FSB="800 MHz" ; BF=200 ; name="Intel Pentium D 830" ;;
+			*"3.20GHz"*) FSB="800 MHz" ; BF=200 ; name="Intel Pentium D 840" ;;
+		esac
+		;;
+
+	"Pentium D (Presler)") #done
+		# http://www.cpu-world.com/CPUs/Pentium_D/TYPE-Pentium D (Presler).html
+		technology=65
+		socketX="LGA 775"
+		FSB="800 MHz"
+		BF=200
+		case $brandstr in
+			*"2.80GHz"*)
+				if [ "$CPU_FEATURE_VMX" ] ; then #virtualization
+					name="Intel Pentium D 920"
+					rev="B1 (QKDH, SL8WS, SL94S)"
+				else
+					name="Intel Pentium D 915"
+					case $stepping in
+						4) name="Intel Pentium D 915" ; rev="C1 (SL9DA)" ;;
+						5) name="Intel Pentium D 915" ; rev="D0 (SL9KB)" ;;
+					esac
+				fi
+				;;
+			*"3.00GHz"*)
+				name="Intel Pentium D 925"
+				if [ "$CPU_FEATURE_VMX" ] ; then #virtualization
+					name="Intel Pentium D 930"
+				fi
+				;;
+			*"3.20GHz"*)
+				name="Intel Pentium D 935"
+				if [ "$CPU_FEATURE_VMX" ] ; then #virtualization
+					name="Intel Pentium D 940"
+				fi
+				;;
+			*"3.40GHz"*)
+				if [ "$CPU_FEATURE_VMX" ] ; then #virtualization
+					name="Intel Pentium D 950"
+					case $stepping in
+						2) rev="B1 (QJYX, SL8WP, SL94P)" ;;
+						4) rev="C1 (QPJT, SL95V)" ;;
+						5) rev="D0 (SL9K8)" ;;
+					esac
+				else
+					name="Intel Pentium D 945"
+					case $stepping in
+						4) rev="C1 (QRLS, SL9QB)" ;;
+						5) rev="D0 (SL9QQ)" ;;
+					esac
+				fi
+				;;
+			*"3.60GHz"*)
+				name="Intel Pentium D 950"
+				case $stepping in
+					4) rev="C1 (QMUR, SL9AP)" ;;
+					5) rev="D0 (QQDH, SL9K7)" ;;
+				esac
+				;;
+			# Intel Pentium Extreme Edition
+			*"3.46GHz"*)
+				name="Intel Pentium Extreme Edition (Pentium D 955)"
+				rev="B1 (SL8WM, SL94N)" #stepping 2
+				;;
+			*"3.73GHz"*)
+				name="Intel Pentium Extreme Edition (Pentium D 965)"
+				rev="C1 (QMUJ, SL9AN)" #stepping 4
+				;;
+		esac
+		;;
+
+	###################################################################
+	#						PENTIUM DUAL CORE
+	###################################################################
+	# https://en.wikipedia.org/wiki/List_of_Intel_Pentium_Dual-Core_microprocessors#Core_based_Pentiums
+	# http://www.cpu-world.com/CPUs/Pentium_Dual-Core/TYPE-Pentium Dual-Core.html
+	
+#	"Conroe (Core 2 Duo) 1024K")
+#		;&
+	"Wolfdale (Core 2 Duo) 2M")
+		socketX="LGA 775"
+		case $brandstr in
+			*"2140"*)  FSB="800 MHz"  ; BF=200 ; name="Intel Pentium Dual-Core E2140" ;;
+			*"2160"*)  FSB="800 MHz"  ; BF=200 ; name="Intel Pentium Dual-Core E2160" ;;
+			*"2180"*)  FSB="800 MHz"  ; BF=200 ; name="Intel Pentium Dual-Core E2180" ;;
+			*"E2200"*) FSB="800 MHz"  ; BF=200 ; name="Intel Pentium Dual-Core E2200" ;;
+			*"E2210"*) FSB="800 MHz"  ; BF=200 ; name="Intel Pentium Dual-Core E2210" ;;
+			*"E2220"*) FSB="800 MHz"  ; BF=200 ; name="Intel Pentium Dual-Core E2220" ;;
+			*"E5200"*) FSB="800 MHz"  ; BF=200 ; name="Intel Pentium Dual-Core E5200" ;;
+			*"E5300"*) FSB="800 MHz"  ; BF=200 ; name="Intel Pentium Dual-Core E5300" ;;
+			*"E5400"*) FSB="800 MHz"  ; BF=200 ; name="Intel Pentium Dual-Core E5400" ;;
+			*"E5500"*) FSB="800 MHz"  ; BF=200 ; name="Intel Pentium Dual-Core E5500" ;;
+			*"E5700"*) FSB="800 MHz"  ; BF=200 ; name="Intel Pentium Dual-Core E5700" ;;
+			*"E5800"*) FSB="800 MHz"  ; BF=200 ; name="Intel Pentium Dual-Core E5800" ;;
+			*"E6300"*) FSB="1066 MHz" ; BF=266 ; name="Intel Pentium Dual-Core E6300" ;;
+			*"E6500"*) FSB="1066 MHz" ; BF=266 ; name="Intel Pentium Dual-Core E6500" ;;
+			*"E6600"*) FSB="1066 MHz" ; BF=266 ; name="Intel Pentium Dual-Core E6600" ;;
+			*"E6700"*) FSB="1066 MHz" ; BF=266 ; name="Intel Pentium Dual-Core E6700" ;;
+			*"E6800"*) FSB="1066 MHz" ; BF=266 ; name="Intel Pentium Dual-Core E6800" ;;
+		esac
+		;;
+
+	###################################################################
+	#						INTEL ATOM
+	###################################################################
+
+	"Atom (Silverthorne)") #done
+		# Atom Z500 series
+		technology=45
+		case $brandstr in
+			*"Z500"*)  FSB="400 MHz" ; BF=100 ; socketX="BGA 441" ; rev="C0 (QGXC, QGZU, SLB6Q)" ;;
+			*"Z510"*)  FSB="400 MHz" ; BF=100 ; socketX="BGA 441" ; rev="C0 (SLB2C)" ;;
+			*"Z510P"*) FSB="400 MHz" ; BF=100 ; socketX="BGA 437" ; rev="C0 (SLGPQ)" ;;
+			*"Z510PT"*)FSB="400 MHz" ; BF=100 ; socketX="BGA 437" ; rev="C0 (SLGPR)" ;;
+			*"Z515"*)  FSB="400 MHz" ; BF=100 ; socketX="BGA 441" ; rev="C0 (QLNS, SLGMG)" ;;
+			*"Z520"*)  FSB="533 MHz" ; BF=133 ; socketX="BGA 441" ; rev="C0 (SLB2H)" ;;
+			*"Z520PT"*)FSB="533 MHz" ; BF=133 ; socketX="BGA 437" ; rev="C0 (SLGPP)" ;;
+			*"Z530"*)  FSB="533 MHz" ; BF=133 ; socketX="BGA 441" ; rev="C0 (SLB6P)" ;;
+			*"Z540"*)  FSB="533 MHz" ; BF=133 ; socketX="BGA 441" ; rev="C0 (QHAB, SLB2M)" ;;
+			*"Z550"*)  FSB="533 MHz" ; BF=133 ; socketX="BGA 441" ; rev="C0 (QLNN, SLGPT)" ;;
+			*"Z560"*)  FSB="533 MHz" ; BF=133 ; socketX="BGA 441" ; rev="C0 (SLH63)" ;;
+		esac
+		;;
+
+	"Atom (Diamondville)") #done
+		# Atom 230 / 330 / N200 series
+		technology=45
+		socketX="BGA 437"
+		FSB="533 MHz"
+		BF=133
+		case $brandstr in
+			*"230"*)  name="Atom 230"  ; rev="C0 (SLB6Z)" ;;
+			*"330"*)  name="Atom 330"  ; rev="C0 (QKGY, SLG9Y)" ;;
+			*"N270"*) name="Atom N270" ; rev="C0 (SLB73)" ;;
+			*"N280"*) name="Atom N280" ; rev="C0 (SLGL9)" ; FSB="667 MHz" ; BF=166 ;;
+		esac
+		;;
+
+	"Atom (Pineview)") #done
+		# Atom D400 / D500 / N400 / N500 series
+		technology=45
+		socketX="BGA 559"
+		FSB="2.5 GT/s DMI"
+		case $brandstr in
+			*"D410"*) BF=166 ; rev="A0 (SLBMH)" ;;
+			*"D425"*) BF=200 ; rev="A0 (SLBXD)" ;;
+			*"D510"*) BF=166 ; rev="B0 (SLBLA)" ;;
+			*"D525"*) BF=200 ; rev="B0 (SLBXC)" ;;
+			*"N435"*) BF=166 ; rev="A0 (SLC4C)" ;;
+			*"N450"*) BF=166 ; rev="A0 (SLBMG)" ;;
+			*"N455"*) BF=166 ; rev="A0 (SLBX9)" ;;
+			*"N470"*) BF=166 ; rev="A0 (SLBMF)" ;;
+			*"N475"*) BF=166 ; rev="A0 (SLBX5)" ;;
+			*"N550"*) BF=166 ; rev="B0 (Q4MF, SLBXF)" ;;
+			*"N570"*) BF=166 ; rev="B0 (Q4L1, SLBXE)" ;;
+		esac
+		;;
+
+	"Atom (Cedarview)")
+		# Atom D2000 / N2000 series
+		technology=32
+		socketX="BGA 559"
+		FSB="2.5 GT/s DMI"
+		#BF=133
+		;;
+	
+	*)
+		if [ "$REPORT" = "" ] ; then
+			echo 
+			echo "------------------------------------------------------"
+			echo "  $brandstr"
+			echo
+			echo "Your processor is not recognized, need to add it.."
+			echo "Run:"
+			echo "	$0 -report"
+			echo "------------------------------------------------------"
+			echo
+		fi
+		;;
+esac
+
+####################################################################
+#					PROCESS $search_table
+####################################################################
+
+flags_match() {
+	zflags=${#@}
+	return 1
+}
+
+if [ "$search_table" != "" ] ; then
+	FSI=$IFS
+	IFS="|"
+	best_score=0
+			   #-------------			--------------------
+	while read zfamily zmodel zstepping zextfamily zextmodel \
+				zhint zflags zl2cache zl3cache ztechnology \
+				zsocket zfsb zbf zname zrevision zurl ; do
+		score=0
+		[ ! "$zfamily" = "$zfamily" ] && continue
+		[ ! "$zmodel" = "$zmodel" ] && continue
+		[ ! "$zextfamily" = "$extfamily" ] && continue
+		[ ! "$zextmodel" = "$zextmodel" ] && continue
+		#--
+		[ "$zstepping" = "$stepping" ] && let score++
+		[ "$zcores" = "$cores" ] && let score++
+		[ "$zl2cache" = "$l2_cache" ] && let score++
+		[ "$zl3cache" = "$l3_cache" ] && let score++
+		#--
+		if [ "$zhint" != "" ] ; then
+			case $brandstr in *"$zhint"*) score=$((score+2)) ;; esac
+		fi
+		if [ "$zflags" ] ; then
+			case $flags in
+				*" $zflags "*) score=$((score+2)) ;;
+				"$zflags "*) score=$((score+2)) ;;
+				*" $zflags") score=$((score+2)) ;;
+			esac
+		fi
+		#echo $score
+		if [ $score -gt $best_score ] ; then
+			best_score=$score
+			socketX=$zsocket
+			FSB=$zfsb
+			BF=$zbf
+			name=$zname
+			rev=$zrevision
+			technology=$ztechnology
+			url=$zurl
+		fi
+	done <<< "$search_table"
+	IFS=$FSI
+fi
+
+####################################################################
+#exit
+
+## socket
+#socket=$(dmidecode -t 4 2>/dev/null | grep 'Socket Designation' | awk '{print $3}')
+case $socket in
+	"FC-478") socket="PGA 478" ;;
+	*) socket=$socketX ;;
+esac
+
+#####################################################################
+#							PRINT INFO
+#####################################################################
+
+[ "$name" ] && echo "      Name: $name"
+echo " Processor: $brandstr"
+echo " Code name: $codename"
+
+# socket
+[ "$socket" ] && echo "    Socket: $socket"
+[ "$FSB" ] && echo -n "       FSB: $FSB"
+[ "$BF" ] && echo -n "   BusFreq: $BF MHz"
+echo
+
+# cache
+echo -n "Cache size: "
+if  [ $l2_cache -gt 0 ] ; then
+	echo -n "L2 $(cache_str $l2_cache)"
+else
+	echo -n "L1 $(cache_str $l1d_cache)"
+fi
+if [ $l3_cache -gt 0 ] ; then
+	echo -n " / L3 $(cache_str $l3_cache)"
+fi
+echo
+
+# technology
+echo "Technology: $technology nm"
+if [ "$CPU_FEATURE_LM" ] ; then
+	echo "      Arch: x86_64 [64 bit data width]"
+else
+	echo "      Arch: i386 [32 bit data width]"
+fi
+
+echo "     Cores: $cores"
+echo "   Threads: $logical"
+
+# family, model, stepping, rev
+if [ "$PRINTFAMILY" = "1" ] ; then
+	echo "         -"
+	echo "    Family: $(print_hex $family)"
+	echo "Ext Family: $(print_hex $extfamily)"
+	echo "     Model: $(print_hex $model)"
+	echo " Ext Model: $(print_hex $extmodel)"
+	echo "  Stepping: $(print_hex $stepping)"
+	[ "$rev" ] && echo "  Revision: $rev"
+fi
+
+# cache specs
+echo "         -"
+#if [ "$PRINTCACHE" = "1" ] ; then
+	echo "     Cache:"
+	[ $l1d_cache -gt 0 ] && echo "            L1 Data: $cores x $l1d_cache ${l1d_assoc}-way"
+	[ $l1i_cache -gt 0 ] && echo "            L1 Inst: $cores x $l1i_cache ${l1d_assoc}-way"
+	[ $l2_cache -gt 0 ] && echo "            Level 2: $cores x $l2_cache ${l2_assoc}-way"
+	[ $l3_cache -gt 0 ] && echo "            Level 3: $l3_cache $l3_assoc"
+#fi
+
+# flags
+echo "     Flags: "
+x=1
+for f in $flags ; do
+	if [ $x -eq 1 ] ; then
+		echo -n "            $f "
+	elif [ $x -gt 6 ] ; then
+		x=0
+		echo "$f"
+	else
+		echo -n "$f "
+	fi
+	x=$((x+1))
+done
+echo
+if [ "$PRINTCACHE" = "1" ] ; then
+	echo "            -"        
+	for flag in $flags ; do
+		echo -n "            "
+		cpu_feature $flag
+	done
+fi
+echo
+
+if [ "$url" ] ; then
+	echo "   Details:"
+	echo "            $url"
+else
+	echo
+fi
+
+### END ###

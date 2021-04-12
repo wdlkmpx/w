@@ -1,0 +1,45 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+source_vesions
+
+# ====================================================
+
+SRC=ms-sys
+PKG=ms-sys_static
+VER=${mssys_ver}
+URL=http://prdownloads.sourceforge.net/ms-sys/ms-sys
+COMP=tar.gz
+DESC=""
+DEPS=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='usr/bin/ms-sys'
+
+build() {
+	cd ${SRC}-${VER}
+
+	EXE='bin/ms-sys'
+	_make
+
+	abort_if_file_not_found ${EXE}
+	_strip ${EXE}
+
+	standard_make_install
+}
+
+# main
+retrieve "${SRC}-${VER}.${COMP}"
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup

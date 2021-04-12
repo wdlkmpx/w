@@ -1,0 +1,10 @@
+[Desktop Entry]
+Encoding=UTF-8
+Name=update
+Comment=
+Exec=update
+Terminal=false
+Type=Application
+Icon=/usr/share/pixmaps/update.png
+
+

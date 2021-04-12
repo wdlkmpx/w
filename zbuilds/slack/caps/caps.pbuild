@@ -1,0 +1,45 @@
+# caps
+
+. ../func
+. ../build.conf
+
+URL=http://distro.ibiblio.org/fatdog/arm/sources/beta/
+PKG=caps
+VER=0.4.5
+COMP=tar.gz
+DESC="CAPS is a collection of LADSPA audio plugins"
+DEPS=+alsa-lib,+alsaequal
+CAT=BuildingBlock
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+build() {
+	# since not X compiling forget build triplet
+	cd ${PKG}-${VER}
+	./configure.py
+	[ "$?" -eq 0 ] || exit 1
+	make
+	[ "$?" -eq 0 ] || exit 1
+	install -d -m 0755 $CWD/$PKG-install/usr/lib/ladspa
+	install -m 0644 ${PKG}.so $CWD/$PKG-install/usr/lib/ladspa
+	install -d -m 0755 $CWD/$PKG-install/usr/share/ladspa/rdf
+	install -m 0644 ${PKG}.rdf $CWD/$PKG-install/usr/share/ladspa/rdf
+	cd -
+}
+	
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT

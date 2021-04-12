@@ -1,0 +1,36 @@
+#!/bin/ash
+
+if [ "$1" != "" ] ; then
+	while read f1 f2 etc ; do
+		if [ "$f1" = "inet" ] ; then
+			echo "${f2#addr:}"
+			exit 0
+		fi
+	done <<EOF
+$(ifconfig $1)
+EOF
+	exit 1
+fi
+
+#---------
+
+newint=1
+interface=""
+while read f1 f2 etc
+do
+	if [ -z $f1 ] ; then #empty line
+		newint=1
+		continue
+	fi
+	if [ $newint -eq 1 ] ; then
+		newint=0
+		interface=$f1
+	fi
+	if [ "$f1" = "inet" ] ; then
+		echo "${interface}: ${f2#addr:}"
+	fi
+done <<EOF
+$(ifconfig)
+EOF
+
+### END ###

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=alsamixer
+GenericName=alsamixer
+Comment=alsamixer
+Icon=/usr/share/pixmaps/player_volume.png
+Type=Application
+Exec=xterm -e alsamixer
+

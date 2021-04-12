@@ -1,0 +1,9 @@
+
+cabextract_ver=1.9.1     # 2019-03-04 -p- https://www.cabextract.org.uk
+clzip_ver=1.12           # 2021-01-06 -p- http://download.savannah.gnu.org/releases/lzip/
+dash_ver=0.5.10.2        # 2018-05-17 http://gondor.apana.org.au/~herbert/dash/files
+ddrescue_ver=1.25        # 2020-03-02 -p- http://download.savannah.gnu.org/releases/ddrescue/
+dmidecode_ver=3.3        # 2020-10-14 -p- http://download.savannah.gnu.org/releases/dmidecode
+mssys_ver=2.6.0          # 2019-17-03 -p- https://sourceforge.net/projects/ms-sys/files/ms-sys development/
+sdparm_ver=1.11          # 2020-03.03 -p- http://sg.danny.cz/sg/sdparm.html#mozTocId166213
+tar_ver=1.34             # 2021-02-13 https://ftp.gnu.org/gnu/tar/

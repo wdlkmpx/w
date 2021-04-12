@@ -1,0 +1,66 @@
+#!/bin/bash
+#w__ 2015
+
+# This script is meant for concatenating video and audio files
+# with the same specs.
+
+tempfile="${HOME}/mediaconcact$$"
+errorfile="${HOME}/mediaconcacterror$$"
+
+if [ ! "$1" -o ! "$2" ] ; then
+	echo "ERROR: Need 2 input files at least..." ; exit
+fi
+
+file=${1%.*}
+ext=${1##*.}
+outfile=${file}-out.${ext}
+
+infiles=$(
+  while [ "$1" ] ; do
+	if [ -f "$1" ] ; then
+		echo $1
+	else
+		echo "ERROR: cannot continue: $1 does not exist" > "$errorfile"
+		break
+	fi
+	shift
+  done
+)
+
+if [ -f "$errorfile" ] ; then
+	cat "$errorfile"
+	rm -f "$errorfile"
+	exit 1
+fi
+
+###############################################################
+
+yad --title='Media Concat' --text="Are you sure you want to concatenate the following files? \n\n${infiles}" \
+	--center --button=gtk-yes:0 --button=gtk-no:1 
+[ $? -ne 0 ] && echo "User cancelled operation" && exit 1
+
+yad --title="Save As..." --width=640 --height=480 --center \
+	--file --save --filename="$outfile" \
+	--button=gtk-cancel:1 --button=gtk-save:0
+[ $? -ne 0 ] && echo "User cancelled operation" && exit 1
+
+echo -n > "$tempfile"
+echo "$infiles" | while read file ; do
+	echo "file '${1}'" >> "$tempfile"
+done
+
+
+function concat() {
+	##https://trac.ffmpeg.org/wiki/Concatenate
+	ffmpeg -f concat -i "$tempfile" -c copy "$outfile"
+	echo
+	echo -n "PRESS ENTER CON CLOSE THIS WINDOWS: "
+	read zz
+}
+export -f concat
+
+xterm -e bash -c concat
+
+rm -f "$tempfile"
+
+### END ###

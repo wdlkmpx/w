@@ -1,0 +1,299 @@
+#!/bin/bash
+# cli / gui script - requires ffmpeg / yad [gui]
+# split an audio file using a CUE sheet as a reference
+
+#set -x
+
+help() {
+	echo "
+	${0##*/} file.cue [outdir]
+"
+	exit 0
+}
+
+if type ffmpeg_static >/dev/null ; then # sfs
+	export ffmpeg='ffmpeg_static'
+else
+	export ffmpeg='ffmpeg'
+fi
+
+#===============================================
+#       GUI (-gui file.cue) - cuefile.desktop
+#===============================================
+
+case $1 in gui|-gui)
+	if ! [ "$ffmpeg" ] ; then
+		yad --title="Error" --text=" \n Please install ffmpeg... \n " --center --image=dialog-error --button=gtk-ok
+		exit 1
+	fi
+	## output dir
+	infile="$2"
+	if [ ! -f "$infile" ] ; then
+		yad --title="Error" --text="File does not exist / Invalid file:\n\n $infile" --center --image=dialog-error --button=gtk-ok
+		exit 1
+	fi
+	infile=`realpath "$infile"`
+	filedir="$(dirname "$infile")"
+	#--
+	outdir=$(yad --title="OUTPUT dir" --center --width=640 --height=480 \
+		--file --directory --filename="$filedir/" \
+		--button=gtk-ok --button=gtk-cancel)
+	if [ ! -d "$outdir" ] ; then
+		echo "User cancelled operation"
+		exit 1
+	fi
+	cat > /tmp/cuesplit$$ <<EOF
+$0 "$infile" "$outdir"
+if [ \$? -ne 0 ] ; then
+	echo -en '\nPRESS ENTER TO CLOSE THIS WINDOW... ' ; read var 
+fi
+EOF
+	xterm -title "Splitting $infile ..." -e bash /tmp/cuesplit$$
+	rm -f /tmp/cuesplit$$
+	;;
+esac
+
+#===============================================
+#                  CLI
+#===============================================
+
+case $1 in ""|-h|--help) help ;; esac
+
+FFMETADA_TXT_FILE="/tmp/ffmetadata__$$.txt"
+
+if ! [ "$ffmpeg" ] ; then
+	echo 'Please install ffmpeg...'
+	exit 1
+fi
+
+#=======================================================
+
+cueindex_to_fftime() {
+# $1: -ss (start time) or -t (duration)
+# $2: index
+	if [ "$2" ] ; then
+		#04:03:17 -> 00:04:03.170
+		IFS=":" read mm ss sss <<< "$2"
+		echo "$1 00:${mm}:${ss}.${sss}0"
+	fi
+}
+
+create_ffmetadata() {
+# $1: audio_file.ext
+ case ${1,,} in # lowercase
+	*.mp3)
+		(
+		# http://jonhall.info/create_id3_tags_using_ffmpeg/
+		echo ';FFMETADATA1'
+		[ "$PREVIOUS_TRACK_NUMBER" ]    && echo "TRCK=${PREVIOUS_TRACK_NUMBER}"
+		[ "$PREVIOUS_TRACK_PERFOMER" ]  && echo "TPE1=${PREVIOUS_TRACK_PERFOMER}"
+		[ "$PREVIOUS_TRACK_COMPOSER" ]  && echo "TCOM=${PREVIOUS_TRACK_COMPOSER}"
+		[ "$PREVIOUS_TRACK_TITLE" ]     && echo "TIT2=${PREVIOUS_TRACK_TITLE}"
+		[ "$PREVIOUS_TRACK_ISRC" ]      && echo "ISRC=${PREVIOUS_TRACK_ISRC}"
+		[ "$DISC_TITLE" ]   && echo "TALB=${DISC_TITLE}"
+		[ "$DISC_DATE" ]    && echo "TYER=${DISC_DATE}"
+		[ "$DISC_COMMENT" ] && echo "COMM=${DISC_COMMENT}"
+		[ "$DISC_GENRE" ]   && echo "TCON=${DISC_GENRE}"
+		echo ENCODER=
+		echo encoder=
+		) > ${FFMETADA_TXT_FILE}
+		#- ffmpeg param to add metadata
+		ffmetadata="-i ${FFMETADA_TXT_FILE} -map_metadata 1 -id3v2_version 3 -write_id3v1 1"
+		;;
+
+	*.ogg|*.flac|*) # ogg, flac and everything else
+		(
+		#http://www.xiph.org/vorbis/doc/v-comment.html
+		echo ';FFMETADATA1'
+		[ "$PREVIOUS_TRACK_NUMBER" ]    && echo "TRACKNUMBER=${PREVIOUS_TRACK_NUMBER}"
+		[ "$PREVIOUS_TRACK_NUMBER" ]    && echo "TRACK=${PREVIOUS_TRACK_NUMBER}"
+		[ "$PREVIOUS_TRACK_PERFOMER" ]  && echo "ARTIST=${PREVIOUS_TRACK_PERFOMER}"
+		[ "$PREVIOUS_TRACK_COMPOSER" ]  && echo "COMPOSER=${PREVIOUS_TRACK_COMPOSER}"
+		[ "$PREVIOUS_TRACK_TITLE" ]     && echo "TITLE=${PREVIOUS_TRACK_TITLE}"
+		[ "$PREVIOUS_TRACK_ISRC" ]      && echo "ISRC=${PREVIOUS_TRACK_ISRC}"
+		[ "$DISC_TITLE" ]   && echo "ALBUM=${DISC_TITLE}"
+		[ "$DISC_DATE" ]    && echo "DATE=${DISC_DATE}"
+		[ "$DISC_COMMENT" ] && echo "DESCRIPTION=${DISC_COMMENT}"
+		[ "$DISC_GENRE" ]   && echo "GENRE=${DISC_GENRE}"
+		echo ENCODER=
+		echo encoder=
+		) > ${FFMETADA_TXT_FILE}
+		#- ffmpeg param to add metadata
+		ffmetadata="-i ${FFMETADA_TXT_FILE} -map_metadata 1"
+		;;
+ esac
+}
+
+#=======================================================
+
+function splitcue() { 
+#$1: file.cue
+	cuefile="$@"
+
+	DISC_GENRE=
+	DISC_DATE=
+	DISC_ID=
+	DISC_TRACKTOTAL=
+	DISC_TITLE=
+	DISC_PERFORMER=
+	DISC_CATALOG=
+	DISC_COMMENT=
+	
+	out_ext=
+	HEADER=1
+
+	while read K1 K2 ETC
+	do
+
+		if [ "$HEADER" ] ; then
+			# === PROCESS GLOBAL INFO ===
+			KEYWORD=${K1^^} # uppercase K1
+			if [ "$KEYWORD" = "REM" ] ; then # ignore
+				KEYWORD=${K2^^}   # uppercase K2
+				INFO=$(echo $ETC) # trim
+				INFO2="$ETC"
+			else
+				INFO=$(echo $K2 $ETC) # trim
+				INFO=${INFO//\"}      # remove "
+				INFO2="$K2 $ETC"
+			fi
+			case $KEYWORD in
+				GENRE)      DISC_GENRE="$INFO"      ;;
+				DATE)       DISC_DATE="$INFO"       ;;
+				DISCID)     DISC_ID="$INFO"         ;;
+				TRACKTOTAL) DISC_TRACKTOTAL="$INFO" ;;
+				COMMENT)    DISC_COMMENT="$INFO2"   ;;
+				TITLE)      DISC_TITLE="$INFO"      ;;
+				PERFORMER)  DISC_PERFORMER="$INFO"  ;;
+				CATALOG)    DISC_CATALOG="$INFO"    ;;
+				FILE) # tracklisting starts here
+					
+					unset HEADER
+					# $infile
+					infile=${INFO% *} # remove last word (MP3/WAVE/ etc)
+					if [ -f "${cuedir}/$infile" ] ; then
+						infile="${cuedir}/$infile"
+					else
+						infile=$(find "${cuedir}" -maxdepth 1 -iname "$infile")
+						if [ ! -f "$infile" ] ; then
+							echo "File not found:\n\n	$infile"
+							exit 1
+						fi
+					fi
+					echo $infile
+					# $out_ext / $ff_audio_codec
+					case "${infile,,}" in # lowercase
+						*.wav|*.alac|*.ape|*.tta|*.wv|*.tak)
+							out_ext='flac'
+							ff_audio_codec="-c:a flac" #transcode
+							;;
+						*) # use same file extension
+							ff_audio_codec="-c:a copy"
+							out_ext=${infile##*.}
+							;;
+					esac
+					;;
+			esac
+
+		else
+			# === PROCESS TRACK INFO ===
+			KEYWORD=${K1^^} # uppercase K1
+			INFO=$(echo $K2 $ETC) # trim
+			INFO=${INFO//\"}      # remove "
+			case ${KEYWORD} in
+				TRACK)     TRACK_NUMBER=${K2}     ;; #TRACK 01 AUDIO
+				PERFORMER) TRACK_PERFOMER="$INFO" ;; #PERFORMER "Singer"
+				COMPOSER)  TRACK_COMPOSER="$INFO" ;;
+				TITLE)     TRACK_TITLE="$INFO"    ;; #TITLE "Song"
+				ISRC)      TRACK_ISRC="$INFO"     ;;
+			esac
+			#--
+			if [ "$TRACK_PERFOMER" = "" -a "$DISC_PERFORMER" ] ; then
+				TRACK_PERFOMER="$DISC_PERFORMER"
+			fi
+			#--
+			if [ "$KEYWORD" = "INDEX" -a "$K2" = "01" ] ; then
+				#INDEX 01 00:00:00
+				TRACK_INDEX=${ETC}
+				# PREVIOUS_TRACK_INDEX is set after 1st track is processed
+				if [ "$PREVIOUS_TRACK_INDEX" ] ; then
+					# write previous track info
+					OUT_FILE="${PREVIOUS_TRACK_NUMBER} - ${PREVIOUS_TRACK_TITLE}.${out_ext}"
+					create_ffmetadata "$OUT_FILE"
+					${ffmpeg} -y -i "$infile" ${ffmetadata} \
+						$(cueindex_to_fftime -ss $PREVIOUS_TRACK_INDEX) \
+						$(cueindex_to_fftime -t  $TRACK_INDEX) \
+						${ff_audio_codec} "${OUT_FILE}"
+					rm -f ${FFMETADA_TXT_FILE}
+					ffmetadata=''
+				fi
+				PREVIOUS_TRACK_INDEX="${TRACK_INDEX}"
+				PREVIOUS_TRACK_NUMBER="${TRACK_NUMBER}"
+				PREVIOUS_TRACK_PERFOMER="${TRACK_PERFOMER}"
+				PREVIOUS_TRACK_COMPOSER="${TRACK_COMPOSER}"
+				PREVIOUS_TRACK_TITLE="${TRACK_TITLE}"
+				PREVIOUS_TRACK_ISRC="${TRACK_ISRC}"
+				# now reset values for the next track
+				TRACK_INDEX=
+				TRACK_NUMBER=
+				TRACK_PERFOMER=
+				TRACK_COMPOSER=
+				TRACK_TITLE=
+				TRACK_ISRC=
+			fi
+		fi
+	done < "$cuefile"
+	#-
+	if ! [ "$PREVIOUS_TRACK_INDEX" ] ; then
+		return 1 # error
+	fi
+	#- last track only has start time
+	# write previous track info
+	OUT_FILE="${PREVIOUS_TRACK_NUMBER} - ${PREVIOUS_TRACK_TITLE}.${out_ext}"
+	create_ffmetadata "$OUT_FILE"
+	${ffmpeg} -y -i "$infile" ${ffmetadata} \
+		$(cueindex_to_fftime -ss $PREVIOUS_TRACK_INDEX) \
+		$(cueindex_to_fftime -t  $TRACK_INDEX) \
+		${ff_audio_codec} "${OUT_FILE}"
+	rm -f ${FFMETADA_TXT_FILE}
+	ffmetadata=''
+}
+
+#==========================================================
+#                        MAIN
+#==========================================================
+
+CUEFILE="$1"
+outdir="$2"
+if ! [ "$outdir" ] ; then
+	outdir=$(pwd)
+fi
+
+if [ ! -f "$CUEFILE" ] ; then
+	echo "* File not found: $CUEFILE"
+	exit 1
+fi
+
+case ${CUEFILE,,} in # lowercase
+	*.cue) ok=1 ;;
+	*) echo "Need a cue file" ; exit 1 ;;
+esac
+
+CUEFILE=`realpath "$CUEFILE"`
+echo $CUEFILE
+cuename="$(basename "$CUEFILE")"
+cuedir="$(dirname "$CUEFILE")"
+outdir=${outdir}/${cuename%.*}
+mkdir -p "$outdir"
+echo "outdir: $outdir"
+cd "$outdir"
+
+cue_file=/tmp/cuefile$$
+cp "$CUEFILE" "$cue_file" || exit 1
+dos2unix "$cue_file"
+splitcue "$cue_file"
+rm -f "$cue_file"
+
+exit 0
+
+### END ###

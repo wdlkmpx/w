@@ -1,0 +1,244 @@
+#!/bin/bash
+#w__ 2015
+
+# requirements
+# * mkvtoolnix	- https://www.bunkus.org/videotools/mkvtoolnix/ )
+# * yad			- http://sourceforge.net/projects/yad-dialog/
+# * bash 4
+#
+# mktoolnix version used in this script: 7.7.0 ('Six Voices')
+
+function help() {
+	script=${0##*/}
+	echo "
+Usage:
+	$script extract <file.mkv> [opt] (extract tracks)
+	$script title <file.mkv>   (set title prop)
+	$script info <file.mkv>    (get basic info)
+	
+[opt] can be: all, audio, subtitle, video or extra
+"
+	exit
+}
+
+export file=
+
+function mkvprog() {
+	local prog=$1
+	if [ -x "./$prog" ] ; then 
+		echo "./$prog"
+	elif which ${prog} &>/dev/null ; then
+		echo ${prog}
+	else
+		yad --center --title="error" --text=" \nCould not find '${prog}' " --image=dialog-error --button=gtk-ok:0
+		echo "ERROR"
+		exit 1
+	fi	
+}
+
+function mkvinfo() {
+	mkvmerge=$(mkvprog mkvmerge) || exit 1
+	$mkvmerge -i "$file"
+}
+
+function mkvextractx() {
+	mkvextract=$(mkvprog mkvextract) || exit 1
+	mkvmerge=$(mkvprog mkvmerge) || exit 1
+	
+	#################################################
+	# automatic mode: matroska extract file [option]
+	if [ "$extra" ] ; then
+		ALLSTREAMS='FALSE'
+		AUDIOSTREAMS='FALSE'
+		SUBTITLESTREAMS='FALSE'
+		VIDEOSTREAMS='FALSE'
+		EXTRADATA='FALSE'
+		case $extra in
+			all)		AUTO=1; ALLSTREAMS='TRUE'		;;
+			audio)		AUTO=1; AUDIOSTREAMS='TRUE'		;;
+			subtitle)	AUTO=1; SUBTITLESTREAMS='TRUE'	;;
+			video)		AUTO=1; VIDEOSTREAMS='TRUE'		;;
+			extra)		AUTO=1; EXTRADATA='TRUE'		;;
+		esac
+	fi
+	#################################################
+
+	if [ ! "$AUTO" ] ; then
+		dialog_result=$(yad --title="matroska extract" \
+			--center --fixed --buttons-layout="center" \
+			--separator="\n" --form  \
+			--field="File: ${file##*/}:LBL" "" \
+			--field="Extract from matroska file::LBL" "" \
+			--field="ALL streams:CHK" "$ALLSTREAMS" \
+			--field="AUDIO streams:CHK" "$AUDIOSTREAMS" \
+			--field="SUBTITLE streams:CHK" "$SUBTITLESTREAMS" \
+			--field="VIDEO streams:CHK" "$VIDEOSTREAMS" \
+			--field="EXTRA data:CHK" "$EXTRADATA" \
+			--field="Output dir:DIR" "$dir" \
+			--button=gtk-ok:0 \
+			--button=gtk-cancel:1 \
+		)
+		[ $? -ne 0 ] || [ "$dialog_result" = "" ] && echo "User cancelled operation" && exit 2
+		x=1
+		while read fieldvalue; do
+			[ $x -eq 8 ] && dir="$fieldvalue"
+			[ $x -eq 3 ] && ALLSTREAMS="$fieldvalue"
+			[ $x -eq 4 ] && AUDIOSTREAMS="$fieldvalue"
+			[ $x -eq 5 ] && SUBTITLESTREAMS="$fieldvalue"
+			[ $x -eq 6 ] && VIDEOSTREAMS="$fieldvalue"
+			[ $x -eq 7 ] && EXTRADATA="$fieldvalue"
+			let x++
+		done <<< "$dialog_result" #use this method instead of a pipe (problem with variables)
+	fi
+	
+	cd "$dir"
+	
+	yad --title="matroska extract" --no-buttons --text=" Extracting streams from matroska file... Please wait... " --center & #--window-icon=
+	splashpid=$!
+
+	######################################
+	# audio, video and subtitle streams  #
+	######################################
+	
+	streamlist=$( $mkvmerge --identify "$file" | grep "Track ID" )
+	#Track ID 0: video (MPEG-4p10/AVC/h.264)
+	#Track ID 1: audio (AAC)
+
+	x=-1
+	extractopt=
+	while read line ; do
+		#echo $line
+		let x++
+		case $line in
+			*audio*)
+				[ "$ALLSTREAMS" = "FALSE" ] && [ "$AUDIOSTREAMS" = "FALSE" ] && continue
+				case ${line,,} in
+					*flac*)		ext=flac	;;
+					*aac*)		ext=aac		;;
+					*ac3*)		ext=ac3		;;
+					*mp3*)		ext=mp3		;;
+					*vorbis*)	ext=ogg		;;
+					*wavpack*)	ext=wv		;;
+					*alac*)		ext=alac.m4a;;
+					*trueaudio*)ext=tta		;;
+					*pcm*)		ext=wav		;;
+					*)			ext=audio	;;
+				esac
+				extractopt+=" ${x}:${namex}_Track${x}.${ext}"
+				;;
+			*video*)
+				[ "$ALLSTREAMS" = "FALSE" ] && [ "$VIDEOSTREAMS" = "FALSE" ] && continue
+				case ${line,,} in
+					*avc*)		ext=raw.h264	;;
+					*mpeg-4p2*)	ext=avi			;;
+					#**)		ext=			;;
+					*)			ext=video		;;
+				esac				
+				extractopt+=" ${x}:${namex}_Track${x}.${ext}"
+				;; 
+			*subtitles*)
+				[ "$ALLSTREAMS" = "FALSE" ] && [ "$SUBTITLESTREAMS" = "FALSE" ] && continue
+				case ${line,,} in
+					*usf*)		ext=usf		;;
+					*sub*alpha*)ext=ass     ;;
+					*srt*)		ext=srt		;;
+					*vob*)		ext=sub.idx	;;
+					*)			ext=subtitle;;
+				esac
+				extractopt+=" ${x}:${namex}_Track${x}.${ext}"
+				;;
+		esac
+	done <<< "$(echo "$streamlist")"
+
+	if [ "${extractopt}" ] ; then
+		echo ${mkvextract} tracks "$file" ${extractopt}
+		${mkvextract} tracks "$file" ${extractopt}
+	fi
+
+	##########################################
+
+	[ "$ALLSTREAMS" = "FALSE" ] && [ "$EXTRADATA" = "FALSE" ] && kill -9 $splashpid && return
+	
+	########################
+	#      attachments     #
+	########################
+	#Attachment ID 1: type 'text/html', size 9294 bytes, file name 'ANIME_ENG_DUB.html'
+	attachments="$( ${mkvmerge} --identify "$file" | grep "Attachment ID" )"
+	echo $attachments
+	x=0
+	extractopt=
+	while read line ; do
+		let x++
+		outfile=$(echo $line | sed -e "s|.*file name '||" -e "s|'$||" -e "s| |_|g")
+		echo $outfile
+		extractopt+=" ${x}:${outfile}"
+	done <<< "$(echo "$attachments")"
+	echo ${mkvextract} attachments "$file" ${extractopt}
+	${mkvextract} attachments "$file" ${extractopt}
+
+	########################
+	#       chapters       #
+	########################
+	chapters=$(${mkvextract} chapters "$file")
+	[ "$chapters" ] && echo "$chapters" > ${namex}_chapters.xml
+
+	########################
+	#         tags         #
+	########################
+	tags=$(${mkvextract} tags "$file")
+	[ "$tags" ] && echo "$tags" > ${namex}_tags.xml
+	
+	########################
+	#       cuesheet       #
+	########################
+	cuesheet=$(${mkvextract} cuesheet "$file")
+	[ "$cuesheet" ] && echo "$cuesheet" > ${namex}_cuesheet.cue	
+	
+	kill -9 $splashpid
+}
+
+function settitle() {
+	mkvpropedit=$(mkvprog mkvpropedit) || exit 1
+	filex=${file##*/}
+	filex=${filex%.*}
+	if [ ! "$extra" ] ; then
+		extra=$(yad --title=matroska --text="Enter Title for file: \n ${filex}" --entry --entry-text="$filex" --center --width=480)
+		[ ! "$extra" ] && echo "User cancalled operation" && exit 1
+	elif [ "$extra" = 'filename' ] ; then
+		extra=$filex
+	fi
+	echo ${mkvpropedit} --set "title=$extra" "$file"
+	${mkvpropedit} --set "title=$extra" "$file"
+}
+
+##########################################
+
+action=$1
+shift
+file=$1
+shift
+extra=$@
+
+[ ! "$action" ] && help 1
+[ ! "$file" ] && echo "ERROR: No input file" && exit 1
+[ ! -e "$file" ] && echo "ERROR: $file does not exist" && exit 1
+[ ! -f "$file" ] && echo "ERROR: $file is not a regular file" && exit 1
+
+[[ ${file} != /* ]] && file=${PWD}/${file}
+dir=${file%/*}
+name=${file##*/}
+
+namex=${name// /_}
+namex=${namex//	/_}
+namex=${namex%.*}
+
+case $action in
+	extract) 	mkvextractx ;;
+	info)		mkvinfo  ;;
+	title)		settitle $file ;;
+	*)
+		help
+		;;
+esac
+
+### END ###

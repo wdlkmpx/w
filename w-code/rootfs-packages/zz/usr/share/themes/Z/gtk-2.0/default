@@ -1,0 +1,77 @@
+ #https://developer.gnome.org/gtk2/2.24/GtkSettings.html
+#gtk-enable-accels = 1
+gtk-can-change-accels = 1
+gtk-enable-animations = 1
+gtk-enable-mnemonics = 1
+gtk-menu-images = 1
+gtk-button-images = 1
+gtk-enable-tooltips = 1
+#gtk-icon-theme-name = "hicolor"
+gtk-color-palette = { black:white:gray50:red:purple:blue:light blue:green:yellow:orange:lavender:brown:goldenrod4:dodger blue:pink:light green:gray10:gray30:gray75:gray90 }
+# Size to use for cursors, or 0 to use the default size. [0,128]
+#gtk-cursor-theme-size=0
+#gtk-enable-event-sound=0
+#gtk-enable-input-feedback-sounds=0
+#gtk-split-cursor=0
+#gtk-xft-rgba=0
+#gtk-xft-antialias=0
+#gtk-xft-dpi=102
+#gtk-toolbar-style=2
+
+style "Z" {
+
+# for gtk2...
+font_name="Arial Unicode MS 9"
+
+##This option is used in many places to determine padding between text and border of widgets. For details see the geometry documentation of the specific widgets.
+xthickness = 1
+ythickness = 1
+#>= 0  def=6 Spacing between buttons.
+GtkDialog::button-spacing = 8 
+#0-1 def=1 Whether the window should be decorated by the window manager. 
+#GtkWindow::decorated = 1
+
+#GtkToolbar::tooltips = 0
+#GtkWidget::interior_focus         = 0
+#GtkWidget::focus_padding          = 0
+#GtkButton::default_border         = { 0, 0, 0, 0 }
+#GtkButton::default_outside_border = { 0, 0, 0, 0 }
+#GtkButton::inner_border = { 0, 0, 0, 0 }
+#GtkRange::trough_border           = 0
+#GtkRange::slider_width            = 14
+#GtkRange::stepper_size            = 14
+#GtkRange::trough-under-steppers   = 0
+#GtkPaned::handle_size             = 6
+#GtkScrollbar::min_slider_length   = 30
+#GtkCheckButton::indicator_size    = 12
+#GtkMenuBar::internal_padding      = 0
+#GtkOptionMenu::indicator_size     = { 12, 8 }
+#GtkOptionMenu::indicator_spacing  = { 0, 4, 0, 0 }
+
+fg[NORMAL]		= "black"		#Foreground text of nearly all widgets (not editor text)
+#fg[PRELIGHT]	= "black" #"#FFFF00"		#Foreground text as you mouse-over something
+#fg[ACTIVE]		= "#FFFF00"		#Foreground text of non-selected but available widgets
+#fg[SELECTED]	= "#FFFF00"		#The foreground of something as you click on it, or which is already selected
+#fg[INSENSITIVE]	= "red"		#Foreground text of inactive buttons, etc.
+
+bg[NORMAL]		= "#DEDBD6"		#The background of every non-clickable/non-active element
+#bg[PRELIGHT]	= "#8DACAC"		#mouseover bg radiobuttons and checkboxes.
+#bg[ACTIVE]		= "#C7C9CB"		#v2 - #The background of Evolutions"s icons, selected folder, shorcut panel, etc.
+#bg[SELECTED]	= "#A2B0B7"		#v2 - #The background of something as you click on it, or which is already selected
+bg[INSENSITIVE]	= "#DEDBD6"		#v2 - #Background of un-clickable widgets
+
+base[NORMAL]	= "white"		#Background for just about everything (editor windows, Evolution"s folders, etc.)
+#base[SELECTED]	= "#ECE9F7"		#Background of selected text in a list when window is in foreground
+#base[ACTIVE]	= "#94abc3"		#Background of selected text in a list when window not in foreground
+#base[PRELIGHT]	= "#ffffff"		#??
+#base[INSENSITIVE]= "#ffffff"	#Background of un-clickable widgets
+
+#text[SELECTED]	= "#000000"		#Foreground of selected text in a list when window is in foreground
+#text[ACTIVE]	= "#FFFF00"		#Certain highlighted/selected things
+#text[PRELIGHT]	= "#FFFF00"
+#text[INSENSITIVE]= "#9B9B9B"	#Un-selectable text
+}
+
+class "GtkWidget" style "Z"
+
+	

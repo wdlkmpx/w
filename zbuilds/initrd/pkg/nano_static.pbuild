@@ -1,0 +1,55 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+source_libs_sh # ncurses
+
+# ====================================================
+
+URL=https://ftp.gnu.org/pub/gnu/nano
+SRC=nano
+PKG=nano_static
+VER=5.6.1
+COMP=tar.xz
+DESC="nano text editor"
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='usr/bin/nano'
+
+build() {
+	ncurses_build
+	cd ${SRC}-${VER}
+	EXE='src/nano'
+	# /etc/nanoroc - nanorc
+	# /usr/share/nano/*.nanorc
+	opts="--prefix=/usr --sysconfdir=/etc " #--enable-tiny --enable-color --enable-nanorc --enable-utf8"
+	_configure
+	# https://lists.gnu.org/archive/html/help-nano/2013-01/msg00001.html
+	sed -i 's|.*HAVE_USE_DEFAULT_COLORS.*|#define HAVE_USE_DEFAULT_COLORS 1|' config.h
+	sed -i 's|.*GNU_WORDBOUNDS.*|#define GNU_WORDBOUNDS 1|' config.h
+	_make
+
+	abort_if_file_not_found ${EXE}
+	_strip ${EXE}
+
+	standard_make_install
+	echo 'include "/usr/share/nano/*.nanorc"' > nanorc
+	copy_to_install_dir etc nanorc
+}
+
+# main
+ncurses_download
+retrieve ${SRC}-${VER}.${COMP}
+[ "$DLD_ONLY" = "yes" ] && exit
+rm -rf ${SRC}-${VER}
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup

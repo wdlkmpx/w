@@ -1,0 +1,35 @@
+#!/bin/sh
+# PLinux apps written in C
+
+. ../../func
+. ../../build.conf
+
+URL=
+PKG=aaa_pup_c
+VER=1.2
+COMP=tar.gz
+DESC="basic pup apps"
+DEPS=+cairo
+CAT=BuildingBlock
+DESKTOP=aaa_pup_c.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+# comment these 2 below if you use a custom package() function
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not
+
+ARCH=$(uname -m)
+
+build() {
+	rm -rf ${PKG}-${VER}
+	cp -a ${PKG} ${PKG}-${VER}
+	cd ${PKG}-${VER}
+	make && mkdir -p $CWD/$PKG-install/usr/sbin
+	make DESTDIR=$CWD/$PKG-install install
+	cd -
+}
+
+# main
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT

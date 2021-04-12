@@ -1,0 +1,123 @@
+#!/bin/bash
+#w__ 2015
+
+LOG=1
+[ ! "$SPEAK" ] && SPEAK=1 #0
+
+##general
+word1="$@"
+word="${word1// /%20}"
+
+if [ ! "$1" ]; then 
+	echo "* Syntax: ${0##*/} <word>" ; exit 1
+fi
+case "$1" in 
+	-h|-help|--help) echo "* Syntax: $0 <word>" ; exit 0 ;; 
+	-backup) 
+		echo "- Creating a backup /usr/share/wordreference"
+		tar --absolute-names -zcf wordreference.tar.gz /usr/share/wordreference
+		echo "- Done" ; exit 
+		;;
+esac
+
+########################################################
+
+function CL_DEFAULT() 	{ echo -en '\e[0;39m\e[0;49m' ; }	#default
+
+# Regular Colors
+function CL_BLACK() 	{ echo -en '\e[0;30m' ; }	# Black
+function CL_RED() 		{ echo -en '\e[0;31m' ; }	# Red
+function CL_GREEN() 	{ echo -en '\e[0;32m' ; }	# Green
+function CL_ORANGE() 	{ echo -en '\e[0;33m' ; }	# Orange
+function CL_BLUE() 		{ echo -en '\e[0;34m' ; }	# Blue
+function CL_PURPLE() 	{ echo -en '\e[0;35m' ; }	# Purple
+function CL_CYAN() 		{ echo -en '\e[0;36m' ; }	# Cyan
+function CL_GRAY() 		{ echo -en '\e[0;37m' ; }	# Gray
+function CL_WHITE() 	{ echo -en '\e[0;38m' ; }	# White
+
+# Bold
+function CL_LBLACK() 	{ echo -en '\e[1;30m' ; }	# Black
+function CL_LYELLOW() 	{ echo -en '\e[1;33m' ; }	# Yellow
+
+
+###########################################################
+####### THE REAL THING BEGINS HERE ###############
+
+if [ $LOG -eq 1 ] ; then
+	if [[ -f "/usr/share/wordreference/$word1" ]] ; then
+		result=$(< "/usr/share/wordreference/$word1") #$(cat /usr/share/wordreference/$word1)
+		[ "$SPEAK" != "0" ] && [ -x /usr/sbin/speak2 ] && speak2 "$word1" &
+	fi
+fi
+
+if [ ! "$result" ] ; then
+	URL='http://www.wordreference.com/es/translation.asp?tranword='
+	translation_html_page="$(wget --no-check-certificate \
+		--user-agent='Mozilla/5.0 (Windows NT 6.1; WOW64; rv:24.0) Gecko/20100101 Firefox/24.0' \
+		-O - ${URL}${word} 2>/dev/null)"
+
+	[ "$SPEAK" != "0" ] && [ -x /usr/sbin/speak2 ] && speak2 "$word1" &
+
+	INSECTION=0
+	while read line ; do
+	  if [ $INSECTION -eq 0 ] ; then
+		case $line in 
+			*id=\"articleWRD\"*) INSECTION=1 ;; 
+			*title=\'pronunciation*) echo "<strong>${word}</strong> $line" ;;
+			*No?translation?found*) 
+				echo -e "\n * No translation found for '${word}'\n" 
+				echo "" > /tmp/trans${$}-abort 
+				exit 1 
+				;;
+		esac
+	  else
+		case $line in 
+			*WRreporterror*) 
+				echo -n "$(CL_DEFAULT)"
+				break ;;
+			*)
+				echo $line
+				;;
+		esac
+	  fi
+	done <<< "$translation_html_page" | \
+	sed \
+		-e 's/&nbsp;/ /g' \
+		-e 's%tr><tr%tr>\n<tr%g' \
+		-e 's%td><td%td>\n<td%g' | \
+	sed \
+		-e "s%class='FrEx'>%> $(CL_CYAN)/ %" \
+		-e "s%class='ToEx'>%> \\\ %" \
+		-e "s%<strong>%$(CL_LYELLOW)%g" \
+		-e "s%</strong>%$(CL_DEFAULT)%g" \
+		-e "s%(%$(CL_ORANGE)(%" \
+		-e "s%)%)$(CL_DEFAULT)%" \
+		-e "s%<em class='tooltip POS2'>.*</span></em>%%" \
+		-e "s%<i>% $(CL_GRAY)(%g" \
+		-e "s%</i>%)$(CL_DEFAULT)%g" \
+		-e 's/<[^>]\+>//g' \
+		-e '/^ $/d' -e '/^$/d' -e '/Principal Trans/d' | \
+		fmt -w 70 -s -u > /tmp/trans$$
+fi
+
+if [ -f /tmp/trans$$ ] ; then
+	result=$(< /tmp/trans$$) #$(cat /tmp/trans$$)
+	rm -f /tmp/trans$$
+fi
+
+if [ -f "/tmp/trans${$}-abort" ] ; then
+	rm -f "/tmp/trans${$}-abort"
+	ERROR=1
+fi
+
+if [ "$result" ] ; then
+	if [ $LOG -eq 1 ] && [ ! "$ERROR" ] ; then
+		mkdir -p /usr/share/wordreference
+		if [ ! -f "/usr/share/wordreference/$word1" ] ; then
+			echo "$result" > "/usr/share/wordreference/$word1"
+		fi
+	fi
+	less -r <<< "$result"
+fi
+
+### END ###

@@ -1,0 +1,25 @@
+#!/bin/sh
+
+# get screen size
+read ROOTDIMS MX MY << EOF
+`xwininfo -root | grep ' \-geometry ' | cut -f 1 -d '+' | tr 'x' ' '`
+EOF
+echo $MX $MY
+
+# default landscape geometry
+GEO=$((3*($MX/4)))x$((9*($MY/32)))+$((($MX/2)-(3*$MX/8)))+$(($MY-(9*${MY}/32)))
+
+# if cellwriter is installed it takes preference
+if which cellwriter 2>/dev/null ;then
+	exec cellwriter --keyboard-only  --dock-window=1
+else
+	if [ $MX -gt $MY ];then
+		OPT2=
+	else
+		# portrait mode
+		OPT2=-no-keypad
+		GEO=${MX}x$(($MY/4))+0+$(($MY-($MY/4)))
+	fi
+	echo $GEO
+	exec xvkbd -geometry $GEO -always-on-top  $OPT2
+fi

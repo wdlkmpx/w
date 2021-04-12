@@ -1,0 +1,433 @@
+#!/bin/sh
+# functions library
+# this is sourced by pkg/<app>_static/<app>_static.pbuild
+#         or         pkg/<app>_static.pbuild
+
+if [ -z ${MWD} ] ; then
+	echo "Use build.sh"
+	exit 1
+fi
+
+if [ "$BUILD_CONF" ] ; then
+	BUILD_CONF=$(basename "$BUILD_CONF")
+else
+	BUILD_CONF='build.conf'
+fi
+
+if [ -f ./${BUILD_CONF} ] ; then
+	build_conf=./${BUILD_CONF}
+elif [ -f ../${BUILD_CONF} ] ; then
+	build_conf=../${BUILD_CONF} #*
+elif [ -f ../../${BUILD_CONF} ] ; then
+	build_conf=../../${BUILD_CONF} #*
+elif [ -f ../../../${BUILD_CONF} ] ; then
+	build_conf=../../../${BUILD_CONF}
+else
+	echo "build.conf not found"
+	exit 1
+fi
+
+. ${build_conf}
+
+
+ARCH=`uname -m`
+if [ "$OVERRIDE_ARCH" ] ; then
+	ARCH=${OVERRIDE_ARCH}
+fi
+
+export PATH=${XPATH}/bin:$PATH # _configure _make _install
+export LD_LIBRARY_PATH=${XPATH}/lib:${LD_LIBRARY_PATH}
+export PKG_CONFIG_PATH=${XPATH}/lib/pkgconfig
+export C_INCLUDE_PATH=${XPATH}/include
+export CPLUS_INCLUDE_PATH=${XPATH}/include
+
+#=====================================================================
+
+function exit_error() {
+	echo -n > $MWD/.fatal
+	if [ "$1" ] ; then
+		echo "$@"
+	fi
+	exit 1
+}
+
+function source_vesions()
+{
+	if [ -f ./versions ] ; then
+		. ./versions
+	elif [ -f ../versions ] ; then
+		. ../versions
+	else
+		exit_error "$0: cannot find ./version"
+	fi
+}
+
+function source_libs_sh()
+{
+	if [ -f ./0--libs.sh ] ; then
+		. ./0--libs.sh
+	elif [ -f ../0--libs.sh ] ; then
+		. ../0--libs.sh
+	else
+		exit_error "$0: cannot find ./0--libs.sh"
+	fi
+}
+
+
+function retrieve() # URL [outfile]
+{
+	local SOURCE=${1}
+	local FILE=$SOURCE
+	case $SOURCE in http*|ftp*)
+		local URL=${SOURCE%/*}
+		local FILE=${SOURCE##*/}
+	esac
+	#--
+	ZZDL=1
+	if [ "$2" != "" ] ; then
+		[ -f ${MWD}/0sources/${2} ] && ZZDL=0
+		zzoutfile="${MWD}/0sources/${2}"
+	else
+		[ -f ${MWD}/0sources/${FILE} ] && ZZDL=0
+		zzoutfile="${MWD}/0sources/${FILE}"
+	fi
+	if [ -f "$zzoutfile" ] && [ ! -s "$zzoutfile" ] ; then
+		ZZDL=1 # empty file , must redownload
+		rm -f "$zzoutfile"
+	fi
+	#--
+	if [ $ZZDL -eq 0 ] ; then
+		if [ "$DLD_ONLY" = "yes" ] ; then
+			echo "Already downloaded ${FILE}"
+		fi
+	else
+		echo "Downloading ${URL}/${FILE}"
+		wget -O ${zzoutfile} -c --no-check-certificate "${URL}/${FILE}"
+		if [ $? -ne 0 ] ; then
+			rm -f ${FILE}
+			exit_error
+		fi
+	fi
+}
+
+
+function extract()
+{
+	if [ "$INSTALLED_FILE" ] ; then
+		check_installed_file
+	fi
+	tfile="$@"
+	if ! [ -f "${MWD}/0sources/$tfile" ] ; then
+		exit_error "No such file: $tfile"
+	fi
+	if ! tar -axf ${MWD}/0sources/${tfile} ; then
+		rm -f ${tfile};
+		exit_error
+	fi
+	echo -e "\n+============================================================================="
+	echo -e "\nbuilding $pkg_sttc"
+}
+
+
+function abort_if_file_not_found()
+{
+	[ "$1" ] || exit_error
+	for i in "$@" ; do
+		if [ ! -f "$i" ] ; then
+			echo "$i: file does no exist!"
+			exit_error
+		fi
+	done
+}
+
+#---------------------------------------------------------
+
+function hl_echo() {
+	if ! [ "$(echo $1)" ] ; then
+		return
+	fi
+	echo
+	echo '------------------------------'
+	echo "$@"
+	echo '------------------------------'
+	echo
+}
+
+function _cflags() {
+	if [ "$OPTIMIZE_FOR_SIZE" = "yes" ] ; then
+		echo "-g -Os" #-fmerge-all-constants -fno-unroll-loops -fomit-frame-pointer -ffunction-sections -fdata-sections"
+	fi
+}
+
+
+function make_sh()
+{
+	# _make() creates make.sh in the current dir (calls make_sh())
+	# You can manually run make.sh and it will source this script (func)
+	# and will call _make() again...
+	# ... but make.sh must not overwrite itself 
+	# that's why it exports MAKE_SCRIPT=yes
+	if [ "$MAKE_SCRIPT" != "yes" ] ; then
+		echo "#!/bin/sh" > make.sh
+		echo "export MAKE_SCRIPT=yes" >> make.sh
+		echo "export XPATH=$XPATH" >> make.sh
+		echo "export MWD=$MWD" >> make.sh
+		echo ". $MWD/func" >> make.sh
+		echo "_make $@" >> make.sh
+		chmod +x make.sh
+	fi
+}
+
+
+#=====================================================================
+#               this is inside the source dir
+#=====================================================================
+
+function _configure()
+{
+	unset host
+	export FORCE_UNSAFE_CONFIGURE=1
+	configure='configure'
+	if [ ! -f configure ] &&  [ -f autogen.sh ] ; then
+		echo "*** Running autogen.sh"
+		./autogen.sh
+	fi
+	if [ -f configure ] ; then
+		#this is to avoid possible problems with the triplet
+		sed -i  -e 's|^build_os=.*|build_os=linux|' \
+				-e 's|^host_os=.*|host_os=linux|' \
+				-e 's|^target_os=.*|target_os=linux|' \
+				-e 's|linux_os=no|linux_os=yes|' configure
+	elif [ -f config.sh ] ; then #mp
+		configure='config.sh'
+	fi
+	echo "PATH: $PATH"
+	host="--host=${XCOMPILER}"
+	hl_echo "./${configure} ${opts} ${host} $@"
+	./${configure} ${opts} ${host} $@ #opts is set in the calling script
+	[ $? -ne 0 ] && exit_error
+}
+
+
+function _make()
+{
+	cf=$(_cflags)
+	if [ -f Makefile ] ; then
+		makefiles=$(find . -type f -name Makefile | tr '\n' ' ')
+		sed -i "s|\(^CFLAGS =.*\)|\1 $cf|g"  ${makefiles}
+		hl_echo "$(grep '^CFLAGS = ' $makefiles)"
+	else
+		export CFLAGS="$cf"
+	fi
+	if [ "$1" = "make" ] ; then
+		shift
+	fi
+	if [ "$1" = "" ] ; then #no args
+		echo "PATH: $PATH"
+		mkstr="${MKFLG}
+CC=${XCOMPILER}-gcc
+CCX=${XCOMPILER}-g++
+CXX=${XCOMPILER}-g++
+LD=${XCOMPILER}-ld
+AR=${XCOMPILER}-ar
+AS=${XCOMPILER}-as
+RANLIB=${XCOMPILER}-ranlib
+NM=${XCOMPILER}-nm
+STRIP=${XCOMPILER}-strip
+OBJCOPY=${XCOMPILER}-objcopy
+OBJDUMP=${XCOMPILER}-objdump
+LDFLAGS=-static"
+		hl_echo "make "${mkstr}
+		make_sh "make "${mkstr}
+		make $mkstr
+	else
+		hl_echo "make $@"
+		make_sh "make $@"
+		eval make $@
+	fi
+	return $?
+}
+
+
+function _strip()
+{
+	local file="$1"
+	echo "${XCOMPILER}-strip --strip-all "$file""
+	${XCOMPILER}-strip --strip-all "$file"
+}
+
+
+function check_static_exe()
+{
+	einfo=$(file $1)
+	echo "$einfo" | grep -E 'dynamically|shared' && {
+		exit_error "$file is not static..!"
+	}
+}
+
+
+function _install()
+{
+	local file="$1" dest="$2"
+	if [ -L "$file" ] ; then # symlink
+		cp -av --remove-destination "$file" "$dest"
+		return
+	fi
+	einfo=$(file $file)
+	case "$einfo" in *ELF*) # linux executable
+		echo "$einfo" | grep -E 'dynamically|shared' && {
+			exit_error "$file is not static..!"
+		}
+		_strip $file
+		chmod +x "$file"
+		;;
+	esac
+	cp -av --remove-destination "$file" "$dest"
+}
+
+
+set_install_dir() {
+	A=$ARCH
+	case $ARCH in i?86) A=x86 ;; esac
+	INSTALL_DIR=${MWD}/out_static/00_${ARCH}/pkg/${SRC}-${VER}-${A}_musl_static
+}
+
+function standard_make_install()
+{
+	if [ "$1" ] ; then
+		INSTALL_DIR=${1}
+	else
+		set_install_dir
+		rm -rf ${INSTALL_DIR}
+	fi
+	mkdir -p ${INSTALL_DIR}
+	make DESTDIR=${INSTALL_DIR} install
+}
+
+
+function check_installed_file() { # [file] (otherwise use ${INSTALLED_FILE})
+	if [ "$FORCE_BUILD" ] ; then #-f
+		return 0
+	fi
+	set_install_dir
+	if [ "$INSTALLED_FILE" ] ; then
+		local file=${INSTALLED_FILE}
+	else
+		local file=$1
+	fi
+	if [ "$file" ] && [ -e ${INSTALL_DIR}/${file} ] ; then
+		echo "INSTALLED: ${INSTALL_DIR}/${file}"
+		exit
+	fi
+}
+
+
+function copy_2 () # targetdir file [newname] [symlinks]
+{
+	local target_dir=$1 file=$2 newname=$3
+	if [ -z "$newname" ] ; then
+		newname=$(basename "$file")
+	else
+		newname=$(basename "$newname")
+	fi
+	shift ; shift ; shift # shift 3 is buggy
+
+	mkdir -p "${target_dir}"
+	_install ${file} ${target_dir}/${newname}
+
+	for i in $@
+	do
+		ln -snfv ${newname} ${target_dir}/${i}
+	done
+}
+
+function copy_to_install_dir() # prefix file [newname] [symlinks]
+{
+	local prefix=$1
+	shift
+	set_install_dir
+	copy_2 ${INSTALL_DIR}/${prefix} $@
+}
+
+function copy_to_toolchain() # prefix file [newname] [symlinks]
+{
+	local prefix=$1
+	set_install_dir
+	shift
+	copy_2 ${XPATH}/${prefix} $@
+}
+
+
+function install_to_toolchain()
+{
+	make DESTDIR=${XPATH} install 
+}
+
+
+function standard_cleanup()
+{
+	cd ${CWD}
+	rm -rf ${SRC}-${VER}*
+
+	pfile=${MWD}/out_static/00_${ARCH}/packages.txt
+	sed -i -e "/^${SRC}-${VER}.*/d" -e "/^${SRC}-.*/d" ${pfile}
+	echo "${SRC}-${VER}" >> ${pfile}
+	echo "done!"
+}
+
+
+function move_from_pkg_to_toolchain() # relative path to INSTALL_DIR
+{
+	set_install_dir
+	local file=${INSTALL_DIR}/${1}
+	cp -av --remove-destination $file ${XPATH}
+	rm -rf ${INSTALL_DIR}/${1}
+}
+
+
+function remove_from_pkg()
+{
+	set_install_dir
+	local file=${INSTALL_DIR}/${1}
+	echo "Removing ${INSTALL_DIR}/${1}"
+	rm -rf ${INSTALL_DIR}/${1}
+}
+
+
+function strip_all_binaries() # [dir] otherwise current dir
+{ # applies to current dir, currently only ELF binaries
+	currentdirX=$PWD
+	if [ "$1" ] ; then
+		cd $1
+	fi
+	for exe in `find . -type f -executable`
+	do
+		info=$(file $exe)
+		case $info in
+			*ELF*) _strip $exe
+		esac
+	done
+	if [ "$1" ] ; then
+		cd $currentdirX
+	fi
+
+}
+
+
+function fix_pkgconfig_for_toolchain() # [dir] otherwise current dir
+{
+	currentdirX=$PWD
+	if [ "$1" ] ; then
+		cd $1
+	fi
+	for pc in `find . -type f -name '*.pc'` `find . -type f -name '*.la'`
+	do
+		echo "fix_pkgconfig_for_toolchain: $pc"
+		sed -i -e "s%/usr/%${XPATH}/%" -e "s%=/usr%=${XPATH}%" ${pc}
+	done
+	if [ "$1" ] ; then
+		cd $currentdirX
+	fi
+}
+
+### END ###

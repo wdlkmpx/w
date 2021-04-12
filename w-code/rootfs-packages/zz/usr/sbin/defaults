@@ -1,0 +1,172 @@
+#!/bin/bash
+#w__ 2015
+#PUPPY SPECIFIC
+
+# fc-cache -s -v -y rootfs-complete usr/share/fonts
+# gtk-update-icon-cache -i -f rootfs-complete/usr/share/icons/hicolor/
+# update-mime-database -V rootfs-complete/usr/share/mime/
+# glib-compile-schemas rootfs-complete/usr/share/glib-2.0/schemas/
+# plinuxapps -prefix rootfs-complete -system
+
+
+function locale() {
+	if [ ! "$1" ] ; then
+		grep '^LANG=' /etc/profile | sed -e 's|^LANG=||'
+	else
+		L="$1"
+		L=${L//.utf8/.UTF-8}
+		L=${L//.utf/.UTF-8}
+		sed -i "s|^LANG=.*|LANG=${L}|" /etc/profile
+		echo "Locale in /etc/profile is now $L"
+	fi
+}
+
+#################################################
+#################################################
+
+function net() { ##zznet for low resource usage
+
+	chmod 0440 /etc/sudoers # sometimes it has the wrong permissions
+	chmod 000 /usr/libexec/gnome-pty-helper
+	chmod 000 /usr/bin/ssh-agent
+	
+	## disabled services
+	dservices='cups smartmontools
+pppd-dns frisbee.sh frisbee smartd udftools hddtemp git-daemon'
+	for serv in ${dservices} ; do chmod -x /etc/init.d/${serv} ; done
+	
+	## enabled services
+	eservices='usb-modeswitch rc.umntshares messagebus'
+	for serv in ${eservices} ; do chmod +x /etc/init.d/${serv} ; done
+	
+	## /root/.config/autostart
+	dfiles='clipit-startup.desktop compton.desktop compton.desktop.bak
+freememapplet_tray.desktop freememapplet.desktop
+firewallstatus.desktop firewallstaterun.desktop netmon_wce.desktop
+network_tray.desktop retrovol.desktop'
+	for dfile in ${dfiles} ; do
+		rm -fv /root/.config/autostart/${dfile}
+		rm -fv /root/.config/lx-autostart/${dfile}
+	done
+	
+	## /root/Startup disabled
+	dapps='conky freememapplet_tray network_tray firewallstaterun'
+	for app in ${dapps} ; do chmod -x /root/Startup/${app} ; done
+	
+	## /root/Startup enabled
+	eapps='akb_keyboard load-touchpad-settings
+powerapplet_tray retrovol_tray'
+	for app in ${eapps} ; do chmod +x /root/Startup/${app} ; done
+	
+	## kill apps
+	services='syslogd klogd cupsd udevd
+pup_event_frontend_d firewallstate' #dbus-daemon dbus-launch
+	for serv in $services ; do killall -9 $serv 2>/dev/null ; done	
+	apps='freememapplet_tray tray_freemem network_tray tray_network conky_wary xload' #xxkb_weezy retrovol
+	for app in $apps ; do killall -9 $app 2>/dev/null ; done
+
+	sed -i '\|xload|d' /root/.jwm/jwmrc-tray1 /root/.jwm/jwmrc-tray2
+
+	sed -i 's|.*xload -nolabel.*|			xloadwashere|' /root/.jwmrc-tray
+	sed -i 's|.*Swallow name="xload".*|		<Swallow name="xload" width="0">|' /root/.jwmrc-tray
+
+	which mplay && plinuxapps -c mediaplayer mplay
+}
+
+function BusyboxSymlinks() {
+	busybox --list | while read applet ; do
+		which $applet &>/dev/null
+		if [ $? -ne 0 ] ; then
+			#echo $function is not present in system
+			rm -f /usr/local/bin/${applet}
+			ln -sv ../../../bin/busybox /usr/local/bin/${applet}
+		fi
+	done
+}
+
+function locales() {
+	locales='en_US en_US.UTF-8 es_ES es_ES.UTF-8 es_PE es_PE.UTF-8 ja_JP ja_JP.UTF-8 ko_KR ko_KR.UTF-8 ru_RU ru_RU.UTF-8'
+	for locale in $locales ; do
+		locale-gen $locale
+	done
+}
+
+function zznet() {
+
+	sed -i "s/.*Xft.dpi:.*/Xft.dpi: 96/" /root/.Xresources #set font dpi to 96
+	gtk-update-icon-cache -i -f /usr/share/icons/hicolor/  ## update icon cache ##
+	update-mime-database -V /usr/share/mime				   ## mime database
+	fc-cache -s -v ## font cache
+	gdk-pixbuf-query-loaders --update-cache
+	fixmenus #no cross-builds
+	glib-compile-schemas /usr/share/glib-2.0/schemas/
+	mandb -c #no cross-builds
+
+	update-ca-certificates	## SSL
+	echo "check_certificate = off
+ca_certificate = /etc/ssl/certs/ca-certificates.crt
+continue = on" >> /etc/wgetrc ## wget
+
+	addgroup mlocate		##echo 'mlocate:x:1001:' >> /etc/group
+	ldconfig				## update lib index
+	#defaults busyboxlinks	## busybox symlinks
+	#defaults locales		## generate locales
+
+	filezz='Bcrypt ePDFView FFConvert Ghostview Gnumeric HomeBank InkLite mhWaveEdit Notecase PupZip Planner Pmusic SeaMonkey-Composer SeaMonkey-web-browser Opera ISOMaster ffconvert ffinfo mkplaylist'
+	for filey in ${filezz} ; do
+		rm -fv /root/.config/rox.sourceforge.net/OpenWith/${filey}
+	done
+
+	#There is an input.conf in ${HOME} that will be ignored because of this
+	rm -fv /etc/mplayer/input.conf
+	#tahrpup
+	find /root/.config/autostart -name '*.desktop' -delete
+	defaults locale en_US.UTF-8
+
+	echo "*** Applying defaults net for low resource usage ***"
+	defaults net
+	echo "*** Finished defaults net ***"
+
+	which gst-inspect-0.10 &>/dev/null && gst-inspect-0.10 #precise
+
+	plinuxapps -c connect net-setup.sh
+
+	##---------------------------------------------------- clamav
+	adduser -D clamav	##echo 'clamav:!:16600:0:99999:7:::' >> /etc/shadow
+	addgroup clamav		##echo 'clamav:x:1003:' >> /etc/group
+	chmod -x /etc/init.d/clamav-*
+	chown -R clamav:clamav /etc/clamav
+	chown -R clamav:clamav /var/log/clamav
+	chown -R clamav:clamav /var/lib/clamav
+	chmod -R 644 /etc/clamav
+	chmod 644 /var/lib/clamav/*.cvd
+	chmod 600 /var/lib/clamav/mirrors.dat
+	##---------------------------------------------------- clamav	
+
+}
+
+#########################################################
+################     EXECUTION     ######################
+#########################################################
+
+case $1 in
+	net)	net 	 ;;
+	busyboxlinks) BusyboxSymlinks ;;
+	locales)      locales ;;
+	locale)		shift ; locale "$@" ;;
+	zz) 
+		app=${0##*/}
+		echo "
+$0
+
+Set important application defaults
+
+$app kb <choice> - Select keybard layout switcher
+$app audiomenu <exe args> - create new rox menu item for audio
+$app net - zznet for low resource usage
+"
+	;;
+	*) $@ ;;
+esac
+
+### END ###

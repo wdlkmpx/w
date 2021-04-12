@@ -1,0 +1,134 @@
+#!/bin/sh
+#w__ 2015
+
+## Config
+export configfile="$HOME/.config/searchtext.cfg"
+[ -f "$configfile" ] && . ${configfile}
+[ "$HTML_OUTPUT" ] && HTML_OUTPUT="FALSE"
+[ "$CASE_SENSITIVE" ] && CASE_SENSITIVE="FALSE"
+[ "$WORD_MATCH" ] && WORD_MATCH="FALSE"
+[ "$DIRDEPTH" ] && DIRDEPTH="1"
+
+export HTML_OUTPUT CASE_SENSITIVE WORD_MATCH DIRDEPTH LASTDIRS SEARCH_STR OUTDIR
+
+##GLOBAL VARIABLES
+export tmpout=/tmp/tmp_searcht_${RANDOM}
+export DIR
+export FILE_EXT
+
+#check arguments
+if [[ -d "$@" ]]; then #valid COMMAND LINE input directory
+	DIR="$@"
+else #unspecified or invalid COMMAND LINE input directory
+	[ ! -d "$LASTDIR" ] && LASTDIR="$PWD"
+	DIR=$(yad --file --directory --filename="$LASTDIR" --width=640 --height=480 --center --title="Select Directory")
+	[[ ! -d "$DIR" ]] && ERROR=1
+fi
+
+#dialog
+if [ ! "$ERROR" ] ; then
+	#----------- INPUT FORM---------------
+	dialog_result=$(yad --title="Search text in dir" --center --borders="4" \
+		--form  --separator="\n" \
+		--field="" "$SEARCH_STR" \
+		--field="HTML output:CHK" "$HTML_OUTPUT" \
+		--field="Case sensitive:CHK" "$CASE_SENSITIVE" \
+		--field="Match whole words:CHK" "$WORD_MATCH" \
+		--field="Directory search depth::LBL" \
+		--field=":NUM" "" "$DIRDEPTH!1..10!1!0")
+	[ $? -ne 0 ] || [ "$dialog_result" = "" ] && echo "User cancelled operation" && exit 2
+	x=1
+	while read fieldvalue; do
+		[ $x -eq 1 ] && SEARCH_STR="$fieldvalue"
+		[ $x -eq 2 ] && HTML_OUTPUT="$fieldvalue"
+		[ $x -eq 3 ] && CASE_SENSITIVE="$fieldvalue"
+		[ $x -eq 4 ] && WORD_MATCH="$fieldvalue"
+		[ $x -eq 6 ] && DIRDEPTH="$fieldvalue"
+		let x++
+	done <<< "$dialog_result" #use this method instead of a pipe (problem with variables)
+	DIRDEPTH=${DIRDEPTH//.000000} ##remove all occurrences of .000000 inside $DIRDEPTH
+fi
+
+#save config
+echo "HTML_OUTPUT=$HTML_OUTPUT
+CASE_SENSITIVE=$CASE_SENSITIVE
+WORD_MATCH=$WORD_MATCH
+DIRDEPTH=$DIRDEPTH
+LASTDIR=\"$LASTDIR\"
+OUTDIR=\"$OUTDIR\"
+SEARCH_STR=\"$SEARCH_STR\"" > "$configfile" 
+
+if [ "$ERROR" ] ; then
+	exit 1
+fi
+
+#THE ONLY CONDITION TO CONTINUE: SEARCH STRING MUST BE SPECIFIED.
+[ "$SEARCH_STR" = "" ] && exit 1 
+
+[ "$CASE_SENSITIVE" = "FALSE" ] && grep_options="-i"
+[ "$WORD_MATCH" = "TRUE" ] && grep_options="$grep_options -w"
+
+#----------------------------------------
+#------- PROCESS INPUT DIRECTORY --------
+#----------------------------------------
+
+if [ "$HTML_OUTPUT" == "TRUE" ]; then ##HTML OUTPUT
+	FILE_EXT="html"
+	tmpout="$tmpout.html"
+	echo -e "<HTML>\n<HEAD>\n<meta http-equiv=content-type content=text/html; charset=utf-8>
+<TITLE> Search results - $SEARCH_STR </TITLE>\n</HEAD>\n\n<BODY text=#115322>\n
+<p> Directory:<font color=#226699> $DIR </font><br>
+Search term:<font color=#226699> $SEARCH_STR </font><br>\n" >> $tmpout 
+
+	find "$DIR" -maxdepth $DIRDEPTH -type f | sort | #pipe: list files+sort+process every file
+		while read line; do #$line = filename (full path)
+			res=$(grep $grep_options "$SEARCH_STR" "$line") 
+			fname="."${line#$DIR} ##remove dir from filename
+			[ "$res" != "" ] && echo -e "<p> <font color=#112299><strong>$fname</strong></font>:<br>\n$res<br>\n" >> $tmpout
+		done	
+		echo -e "</BODY>\n</HTML>" >> $tmpout 
+
+else ##PLAIN TEXT OUTPUT
+	FILE_EXT="txt"
+	tmpout="$tmpout.txt"
+	echo -e "Directory: $DIR\nSearch term: $SEARCH_STR\n" >> $tmpout 
+	find "$DIR" -maxdepth $DIRDEPTH -type f | sort | #pipe
+		while read line; do #$line = filename (full path)
+			res=$(grep $grep_options "$SEARCH_STR" "$line") 
+			fname="."${line#$DIR} ##remove dir from filename
+			[ "$res" != "" ] && echo -e "--> $fname:\n$res\n" >> $tmpout
+		done	
+fi
+
+#----------------------------------------
+#------- DISPLAY RESULTS & SAVE ---------
+#----------------------------------------
+
+function SaveViewerText(){
+	SAVE_AS_DIR="$OUTDIR"
+	[ ! -d "$OUTDIR" ] && SAVE_AS_DIR=$(dirname "$DIR") #use $DIR parent directory
+	SAVE_AS_NAME="@Search_$SEARCH_STR"  
+	SAVE_AS="$SAVE_AS_DIR/$SAVE_AS_NAME.$FILE_EXT"
+	SELECTED_PATH=$(yad --file --save --filename="$SAVE_AS" --width=640 --height=480 --center --title="Save As..." --window-icon="/usr/share/pixmaps/dir2html.png")
+	if [ "$SELECTED_PATH" != "" ]; then
+		sed -i "\|OUTDIR=|d" ${configfile}
+		echo "OUTDIR=\"${SELECTED_PATH%/*}\"" >> ${configfile}
+		cp -fv "$tmpout" "$SELECTED_PATH"
+	fi
+}
+function ViewWith(){
+	[ "$FILE_EXT" = "html" ] && defaulthtmlviewer "$tmpout" &
+	[ "$FILE_EXT" = "txt" ]  && defaulttexteditor "$tmpout" &
+}	
+export -f SaveViewerText
+export -f ViewWith
+
+yad --center --title="Search results: $SEARCH_STR" --width="640" --height="480" --borders="4" \
+	 --always-print-result --text-info --margins="10" --wrap --filename="$tmpout" \
+	--buttons-layout="center" --button=gtk-close \
+	--button="Save As... :sh -c 'SaveViewerText %d'" \
+	--button="Open Externally... :sh -c 'ViewWith %d'" \
+
+rm -fv $tmpout
+
+### END ###

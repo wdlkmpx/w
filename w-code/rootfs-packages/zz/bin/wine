@@ -1,0 +1,126 @@
+#!/bin/sh
+#w__ 2015
+
+export WINEDLLOVERRIDES='mscoree=d;mshtml=d'
+
+wine=
+if [ "$WINEXE" ] ; then #exported variable
+	wine=$WINEXE
+else
+	for dir in /usr/bin /usr/sbin /usr/local/bin ; do
+		[ -x $dir/wine ] && wine=$dir/wine && break
+	done
+fi
+
+if [ ! "$wine" ] ; then
+	exec yad --title="Error" --text="Wine is NOT installed!" --image="dialog-error" --button="OK":0 --center
+fi
+
+process_msi() {
+	help=""
+	silent=""
+	auto=0
+	for i in $* ; do
+		case $i in
+			/?|-h) auto=1 ; help='/?'   ; shift ;;
+			/q|-s) auto=1 ; silent='/q' ; shift ;;
+			/i|-i) auto=1 ; shift ;;
+		esac
+	done
+	switch="${help} ${silent}"
+	if [ $auto -eq 0 ]; then
+		yad --image "dialog-question" --title "Wine MSI Installer" \
+		--button=gtk-yes:0 --button=gtk-no:1 --center --text "Install\n\n $@ \n In Wine?"
+		[ $? -ne 0 ] && exit 1
+	fi
+	exec xterm -hold -e ${wine} msiexec /i \"$@\" $switch
+	exit
+}
+
+case "$1" in
+	tricks|winetricks)
+		echo "Downloading winetricks"
+		url='https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks'
+		wget --no-check-certificate -O /bin/winetricks.temp "$url"
+		if [ $? -eq 0  ] ; then
+			mv -fv /bin/winetricks.temp /bin/winetricks
+			chmod +x /bin/winetricks 
+		else
+			echo "ERROR downloading winetricks"
+		fi
+		exit
+		;;
+		
+	*.msi|*.MSI)
+		process_msi "$@"
+		exit
+		;;
+
+	regs)
+		ls /usr/share/wine/regs/* 2>/dev/null | \
+		while read reg ; do
+			[ -f $reg ] || continue
+			echo "Registering: $reg"
+			${wine} regedit $reg
+		done
+		exit
+		;;
+	
+	start)
+		case $3 in *.msi|*.MSI)
+			shift 2
+			process_msi "$@"
+			exit ;;
+		esac
+		;;
+
+	*.cmd|*.bat|*.CMD|*.BAT)
+		f=$(realpath "$1")
+		filedir=${f%/*} #directory name
+		file=${f##*/}   #filename only
+		echo cd "$filedir"
+		cd "$filedir"
+		exec ${wine} cmd /k "$file" 2>/dev/null
+		;;
+esac
+
+#===============================================
+#check if winedir is present, if not, then create
+if [ ! "$WINEPREFIX" ] && [ ! -d ${HOME}/.wine ]; then
+	rm -fv ${HOME}/.wine
+	INSTALLDIR=
+	DIR=$(yad --file --directory --filename="$HOME" --width=640 --height=480 --center --title="Select Wine DATA dir")
+	[ "$DIR" = "" ] && echo "User cancelled operation" && exit 1
+	INSTALLDIR="$DIR"
+	#tweak for non-standard locations
+	if [ "$INSTALLDIR" != "$HOME" ]; then 
+		IDIR='winedata'
+		IDIR=$(yad --title="Type Wine DATA dir name" --entry --entry-text="$IDIR"  --center --width="250")
+		[ "$IDIR" = "" ] && echo "User cancelled operation" && exit 1
+		[ -d "$INSTALLDIR/.wine" ] && mv "$INSTALLDIR/.wine" "$INSTALLDIR/$IDIR"
+		[ ! -d "$INSTALLDIR/$IDIR" ] && mkdir -p ${INSTALLDIR}/${IDIR}
+		ln -sfv ${INSTALLDIR}/${IDIR} ${HOME}/.wine
+	fi
+	if [ ! -d ${HOME}/.wine ] ; then
+		mkdir -p ${HOME}/.wine
+	fi
+	ls $HOME/wine_regs/* 2>/dev/null | \
+	while read reg ; do
+		if ! [ -f $reg ] ; then
+			continue
+		fi
+		echo "Registering: $reg"
+		${wine} regedit $reg
+	done
+fi
+#===============================================
+
+if [ -f "$1" ] ; then
+	echo "exec ${wine} start /unix "$@""
+	exec ${wine} start /unix "$@"
+else
+	#echo exec ${wine} "$@"
+	exec ${wine} "$@"
+fi
+
+### END ###

@@ -1,0 +1,45 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+# ====================================================
+
+URL=http://ftp.gnu.org/gnu/findutils
+SRC=findutils
+PKG=findutils_static
+VER=4.8.0
+COMP=tar.xz
+DESC=""
+DEPS=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='usr/bin/find'
+
+build() {
+	cd ${SRC}-${VER}
+	opts='--prefix=/usr --disable-nls --without-selinux --enable-dependency-tracking'
+	_configure
+	_make ${MKFLG} LDFLAGS=-static
+
+	abort_if_file_not_found find/find
+	_strip find/find
+	_strip xargs/xargs
+
+	copy_to_install_dir usr/bin find/find
+	copy_to_install_dir usr/bin xargs/xargs
+}
+
+# main
+retrieve ${SRC}-${VER}.${COMP}
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup

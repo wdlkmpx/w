@@ -1,0 +1,50 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+source_libs_sh # ncurses
+
+# ====================================================
+
+URL=http://cjj.kr.distfiles.macports.org/minimumprofit/
+SRC=mp
+PKG=mp_static
+VER=3.3.18b       #old, but my favorite.
+COMP=tar.gz
+DESC="mp text editor"
+ncurses=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='usr/bin/mp'
+
+build() {
+	ncurses_build
+	export CFLAGS=$NC_CFLAGS # ncurses_build
+	export LIBS=$NC_LIBS     # ncurses_build
+	cd ${SRC}-${VER}
+	# /etc/nanoroc - nanorc
+	# /usr/share/nano/*.nanorc
+	opts="--prefix=/usr --sysconfdir=/etc --without-pcre --without-gtk"
+	_configure
+	echo "-static $LIBS" > config.ldflags
+	_make
+	abort_if_file_not_found $SRC
+	copy_to_install_dir usr/bin $SRC
+}
+
+# main
+ncurses_download
+retrieve ${SRC}-${VER}.${COMP}
+[ "$DLD_ONLY" = "yes" ] && exit
+rm -rf ${SRC}-${VER}
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup

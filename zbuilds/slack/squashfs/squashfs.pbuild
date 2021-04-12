@@ -1,0 +1,43 @@
+# squashfs
+
+. ../func
+. ../build.conf
+
+URL=http://downloads.sourceforge.net/project/squashfs/squashfs/squashfs4.3
+PKG=squashfs-tools4
+VER=4.3
+SRCVER=squashfs4.3
+COMP=tar.gz
+DESC="Squashfs tools needed to make a compressed filesystem"
+DEPS=
+CAT=BuildingBlock
+DESKTOP=squashfs4.3.tar.gz.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+build() {
+	mv ${SRCVER} ${PKG}-${VER}
+	cp -af Makefile.new ${PKG}-${VER}/squashfs-tools/Makefile
+	cd ${PKG}-${VER}
+	make -C squashfs-tools
+	[ "$?" -eq 0 ] || exit
+	make -C squashfs-tools INSTALL_DIR=$CWD/${PKG}-install/usr/bin install
+	cd -
+}
+	
+# main
+retrieve ${SRCVER}.${COMP}
+extract ${SRCVER}.${COMP}
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

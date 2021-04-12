@@ -1,0 +1,47 @@
+# gmeasures
+
+. ../func
+. ../build.conf
+
+URL=http://distro.ibiblio.org/puppylinux/sources/g
+PKG=gmeasures
+VER=0.7
+COMP=tar.gz
+DESC="convert measurements from imperial to metric and back"
+DEPS=+gtk+2
+CAT=Business
+DESKTOP=gmeasures.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+build() {
+	cd ${PKG}-${VER}
+	./autogen.sh --prefix=/usr \
+				--localstatedir=/var \
+				--sysconfdir=/etc \
+				--libdir=/usr/${LIBDIR}
+	[ "$?" -eq 0 ] || exit
+	make $MKFLG
+	[ "$?" -eq 0 ] || exit
+	make DESTDIR=$CWD/${PKG}-install install
+	install -d -m 0755 $CWD/${PKG}-install/usr/share/pixmaps
+	install -m 0644 $CWD/${PKG}.png $CWD/${PKG}-install/usr/share/pixmaps/
+	cd -
+}
+	
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT

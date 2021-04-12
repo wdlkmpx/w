@@ -1,0 +1,48 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+source_vesions
+
+# ====================================================
+
+SRC=sdparm
+PKG=sdparm_static
+VER=${sdparm_ver}
+URL=http://sg.danny.cz/sg/p
+COMP=tar.xz
+DESC=""
+DEPS=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='usr/bin/sdparm'
+
+build() {
+	cd ${SRC}-${VER}
+
+	EXE='src/sdparm'
+	opts='--prefix=/usr'
+	_configure
+	_make ${MKFLG} LDFLAGS=-static
+
+	abort_if_file_not_found ${EXE}
+	_strip ${EXE}
+
+	standard_make_install
+}
+
+# main
+retrieve "${SRC}-${VER}.${COMP}"
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup
+

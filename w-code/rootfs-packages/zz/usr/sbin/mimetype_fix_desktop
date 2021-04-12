@@ -1,0 +1,32 @@
+#!/bin/sh
+
+
+if ! [ "$1" ] ; then
+	echo "Specify a valid .desktop file"
+	exit 1
+fi
+
+if [ -f "/usr/share/applications/${1}.desktop" ] ; then
+	DFILE="/usr/share/applications/${1}.desktop"
+elif [ -f "/usr/share/applications/${1}" ] ; then
+	DFILE="/usr/share/applications/${1}"
+elif [ -f "$1" ] ; then
+	DFILE=${1}
+else
+	echo "Specify a valid .desktop file"
+	exit 1
+fi
+
+if ! grep -q 'MimeType=' "$DFILE" ; then
+	echo "$DFILE does not specify mimtypes"
+	exit 1
+fi
+
+MT=$(grep 'MimeType=' "$DFILE" | cut -f 2 -d '=')
+
+NEWMT=$(echo "$MT" | tr ';' '\n' | sort -u | tr '\n' ';')
+
+sed -i '/MimeType=/d' "$DFILE"
+echo "MimeType=${NEWMT#;}" >> "$DFILE"
+
+### END ###

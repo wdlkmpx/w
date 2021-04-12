@@ -1,0 +1,52 @@
+# nbtscan-source
+
+. ../func
+. ../build.conf
+
+URL=http://www.unixwiz.net/tools
+PKG=nbtscan
+SPKG=nbtscan-source
+VER=1.0.35
+COMP=tgz
+DESC="NETBIOS nameserver scanner"
+DEPS=
+CAT=BuildingBlock
+DESKTOP=nbtscan-source.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) LIBDIR=lib64 ;;
+ *) LIBDIR=lib ;;
+esac
+
+build() {
+	mkdir ${PKG}-${VER}
+	tar -xvf ${SPKG}-${VER}.${COMP} -C ${PKG}-${VER}
+	mv ${SPKG}-${VER}.${COMP} ../0sources
+	cd ${PKG}-${VER}
+	make $MKFLG
+	[ "$?" -eq 0 ] || exit
+	strip --strip-unneeded ${PKG}
+	install -d -m 0755 ../${PKG}-install/usr/bin
+	install -m 0755 ${PKG} ../${PKG}-install/usr/bin
+	cd -
+}
+	
+# main
+retrieve ${SPKG}-${VER}.${COMP}
+#extract ${SPKG}-${VER}.${COMP}
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

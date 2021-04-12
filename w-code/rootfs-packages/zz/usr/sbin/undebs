@@ -1,0 +1,113 @@
+#!/bin/bash
+
+function ahelp() {
+	echo "undeb a file or a group of files
+Syntax:
+   undeb [options] <file.deb|directory>
+   directory:process all files in directory 
+
+Options for 
+   -all <file.deb>  process all files in directory in file.deb's dir
+   -2root           send processed dir to /
+"
+	exit $1
+}
+[ $1 ] || ahelp
+
+ALL=0
+TOROOT=0
+for i in $@ ; do
+	case "$1" in
+		-h|-help|--help) ahelp ; exit  ;;
+		-all|all)     ALL=1    ; shift ;;
+		-2root|2root) TOROOT=1 ; shift ;;
+	esac
+done
+
+if [ "$TOROOT" = "1" ] ; then
+	[ "`whoami`" != "root" ] && exec sudo -A ${0} ${@}
+fi
+
+inputfile="$@"
+[ -f "$inputfile" ] || { echo 'ERROR: Files does not exist'; exit 1; }
+[[ $inputfile != *.deb ]] && { echo 'Only .deb files...'; exit 1; }
+dir=$(dirname "$inputfile")
+file=$(basename "$inputfile") 
+targetdir=""
+echo "$inputfile"
+
+type='exe'
+case $inputfile in
+	*-dev_*) type='dev' ;; #ubuntu
+	*-doc_*) type='doc' ;; #ubuntu
+esac
+
+function ProcessDir() {
+	cd "$dir"
+	mkdir -p $targetdir
+	for filename in *.deb; do
+		fname=${filename##*/} #basename $filename
+		case $filename in
+			*-dev_*) mkdir -p ${targetdir}_DEV ; targetdirX=${targetdir}_DEV ;; 
+			#*-doc_*) continue ;; #ignore doc debs
+			*) targetdirX=${targetdir} ;; 
+		esac		
+		echo "* Processing: $fname"
+		xterm -e dpkg-deb -X "$fname" $targetdirX
+	done   
+}
+
+function ProcessFile() {
+	cd "$dir"
+	mkdir -p $targetdir
+	xterm -e dpkg-deb -X "$file" $targetdir
+}
+
+######################################
+
+if [ $ALL -eq 0 ]; then
+	[ ! -f "$inputfile" ] && { echo "* ERROR: Invalid filename"; exit 1; }
+	targetdir="$(basename "$inputfile" .deb)"
+	[ $TOROOT -eq 1 ] && targetdir=$(basename "$inputfile" .deb)${RANDOM}
+	[ "$targetdir" = "" ] && echo "ERR: No target dir" && exit 1 #err
+	ProcessFile
+else
+	#<file.deb>
+	[ -d "$inputfile" ] && dir=$inputfile ##INPUT  DIRECTORY
+	targetdir="debs"
+	[ $TOROOT -eq 1 ] && targetdir="debs${RANDOM}"
+	[ "$targetdir" = "" ] && echo "ERR: No target dir" && exit 1 #err
+	[ ! -f "$inputfile" ] && dir="$(pwd)"
+	ProcessDir
+fi
+
+####################################
+##post-processing.........
+targetdirDOC="${targetdir}_DOC"
+targetdirDEV="${targetdir}_DEV"
+
+function FixMultiArch() {
+	local dir2fix="$@"
+	. /etc/DISTRO_SPECS #$DISTRO_ARCHDIR
+	if [ "$DISTRO_ARCHDIR" ] ; then
+		for BASEDIR in bin lib usr/bin usr/lib usr/include ; do
+			if [ -e ${dir2fix}/${BASEDIR}/${DISTRO_ARCHDIR} ] ; then
+				cp -a --remove-destination ${dir2fix}/${BASEDIR}/${DISTRO_ARCHDIR}/* ${dir2fix}/${BASEDIR}/ 2>/dev/null
+				rm -rf ${dir2fix}/${BASEDIR}/${DISTRO_ARCHDIR}
+			fi
+		done
+	fi
+}
+
+[ -d ${targetdir} ] && FixMultiArch ${targetdir}
+[ -d ${targetdir}_DEV ] && FixMultiArch ${targetdir}_DEV
+
+if [ $TOROOT -eq 1 ] ; then
+	cp -a --remove-destination $targetdir/* /
+	cp -a --remove-destination $targetdir_DEV/* /
+	rm -rfv $targetdir
+	rm -rfv $targetdirDEV
+fi
+
+
+### END ###

@@ -1,0 +1,43 @@
+# rtmpdump
+
+. ../func
+. ../build.conf
+
+URL=http://rtmpdump.mplayerhq.hu/download
+PKG=rtmpdump
+VER=2.3
+COMP=tgz
+DESC="a streaming media library"
+DEPS=
+CAT=BuildingBlock
+DESKTOP=rtmpdump.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+build() {
+	cd ${PKG}-${VER}
+	sed -i 's%\/local%%' Makefile
+	sed -i -e 's%\/local%%' \
+			-e "s%\/lib$%\/${LIBDIR}%" librtmp/Makefile
+	make $MKFLG
+	[ "$?" -eq 0 ] || exit
+	make DESTDIR=$CWD/${PKG}-install install
+	cd -
+}
+	
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

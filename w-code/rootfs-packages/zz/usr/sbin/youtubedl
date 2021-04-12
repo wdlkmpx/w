@@ -1,0 +1,645 @@
+#!/bin/bash
+#w__ 2015
+#arch compat
+#ARCH DEPENDS: xclip python2 mpv youtube-dl
+
+rox=pcmanfm
+if [ -f /etc/DISTRO_SPECS ] ; then
+	export PUPPY=1
+	rox=rox
+fi
+
+function ahelp() {
+	script=${0##*/}
+	echo -e "\n* Syntax:\n
+	$script [videourl] 	(graphical mode, can de used to configure)	
+	$script -auto <v_url> (unattended mode, can be used by other scripts)
+	$script -update [version] (download latest youtubedl)
+	$script -reset	(reset config)
+	$script -last (reuse last stored URL)
+	$script -queue|-batch|-list (GUI to add a link list to download)
+	$script -mpv (play in mpv)"
+	
+	exit $1
+}
+case $1 in -h|-help|--help) ahelp ;; esac
+
+#######################################################################
+
+export PATH=${HOME}/.local:$PATH
+export youtube_dl="$HOME/.local/youtube-dl"
+export youtubedl_extra="${0%/*}/youtubedl-extra"
+export youtube_png="/usr/share/pixmaps/youtube.png"
+export useragent='Mozilla/5.0 (Windows NT 6.3; rv:36.0) Gecko/20150101 Firefox/36.0'
+export configdir=${HOME}/.config/youtubedl
+export YOUTUBEDL="YOUTUBEDL"
+
+AUTO=0
+RESET=0
+TRAY=1
+TRAYONLY=0
+UPDATE=0
+
+#grab last stored url
+function LastURL() {
+	if [ -f "$configdir/lasturl" ] ; then
+		read -r LASTURL < "$configdir/lasturl"
+		echo "$LASTURL"
+	fi	
+}
+
+function LINKLIST() {
+	[[ -e /tmp/linklst.lock ]] && exit 1
+	touch /tmp/linklst.lock	
+	[ -f $configdir/zlist ] && filenamex="--filename=${configdir}/zlist"
+	yad --center --title="Link list" --width="640" --height="480" \
+		--text-info --editable --margins="10" --wrap $filenamex \
+		--window-icon=${youtube_png} \
+		--button="gtk-save:0" --button="gtk-close:1" \
+		--buttons-layout="center" > /tmp/.linklst 
+	[[ $? -eq 0 ]] && mv /tmp/.linklst $configdir/zlist
+	rm -f /tmp/linklst.lock
+	exit
+}
+export -f LINKLIST
+
+function UPDATE() {
+	yad --title="youtube-dl" --no-buttons --text=" Please wait while youtube-dl is updating... " --center --window-icon=${youtube_png} &
+	splashpid=$!
+	res=$(${youtube_dl} --update --no-color)
+	kill -9 $splashpid
+	yad --title="youtube-dl" --text="$res" --center --button=gtk-ok:0 --window-icon=${youtube_png}
+}
+export -f UPDATE
+
+##################################################################################
+
+#parse arguments
+while true; do
+	case $1 in
+		-mpv|mpv)   MPV=1 		;   shift ;;
+		-|-stdin)   STDIN=1 	;   shift ;;
+		-auto)		AUTO=1 		;	shift ;;
+		-reset) 	RESET=1 	;	shift ;;
+		-trayonly)	TRAYONLY=1	; 	shift ;;
+		-notray) 	TRAY=0 		;	shift ;;
+		-last|last)	LAST=1 		; 	shift ;;
+		-zzzlist) 	ZLIST=1 	; 	shift ;;
+		-dir|dir) ${rox} ${configdir}  ; exit ;; #xdg-open
+		-log|log) geany $configdir/zlog ; exit ;;
+		-queue|-batch|-list) LINKLIST ;;
+		-update)
+			UPDATE=1
+			shift 
+			[ "$1" ] && export YTDL_VERSION="$1" && shift
+			;;
+		-here|here) #this is meant to be command line only
+			CURDIR=${PWD}
+			HERE=1 
+			HEREMSG="-here (will download to current dir)"
+			shift 
+			;;		
+		*) break ;;
+	esac
+done
+#echo "$@"
+
+if [ "$MPV" ] ; then
+	if ! which mpv ; then
+		yad --title=mpv --text="\n  Cannot find MPV in your path  \n" --image=dialog-error --center --button=gtk-ok:0
+		exit 1
+	fi
+fi
+
+if [ "$ZLIST" ] ; then
+	if [ -f "$configdir/.stop" ] ; then
+		echo " Stopping downloads"
+		rm -f "$configdir/.stop"
+		exit
+	fi
+fi
+
+if [ $RESET -eq 1 ]; then 
+	[ -e "$configdir" ] && rm -rf $configdir
+	echo "${0}: Config reset"
+	exit 
+fi
+
+export MPV
+
+#######################################################################
+### UPDATE STUFF
+#######################################################################
+export ytdl_finished=/tmp/youtubedlz$$
+
+function DownloadYoutubedl() {
+	#http://youtube-dl.org
+	if [ "$YTDL_VERSION" ] ; then
+		echo '* Downloading youtube-dl from '${YTDL_VERSION}
+		wget http://yt-dl.org/downloads/${YTDL_VERSION}/youtube-dl -O ${youtube_dl}.tmp
+	else
+		echo '* Downloading latest youtube-dl'
+		wget http://yt-dl.org/downloads/latest/youtube-dl -O ${youtube_dl}.tmp
+	fi
+	if [ $? -ne 0 ] ; then
+		rm -fv ${youtube_dl}.tmp
+		echo ; echo -n "* ERROR: Failed to download youtube-dl " ; read var
+		exit 1
+	fi
+	mv -fv ${youtube_dl}.tmp ${youtube_dl}
+	echo -n > ${ytdl_finished}
+}
+export -f DownloadYoutubedl	
+
+if [ ! -f "$youtube_dl" -o ${UPDATE} -eq 1 ] ; then
+	xterm -title "Downloading youtube-dl" -e bash -c DownloadYoutubedl
+	if [ ! -f "$ytdl_finished" ] ; then
+		rm -fv ${youtube_dl}.tmp
+		yad --title=youtubedl --text="\n  Download failed...  \n" --image=dialog-error --center --button=gtk-ok:0
+		exit 1
+	fi
+	rm -fv ${ytdl_finished}
+fi
+
+[ ! -x "$youtube_dl" ] && chmod +x ${youtube_dl}
+
+[ ${UPDATE} -eq 1 ] && exit 
+
+
+#######################################################################
+###			TRAY ICON
+#######################################################################
+if [ $TRAY -eq 1  ]; then
+	ydt=$(busybox ps | grep "\-\-command=youtubedl" - | grep -v grep)
+	if [ "$ydt" = "" ]; then
+		yad --notification --command=youtubedl --image=${youtube_png} &
+	else
+		echo -e "Tray ICON is already active\n$ydt"
+	fi
+	[ $TRAYONLY -eq 1 ] && echo "TRAYONLY is enabled" && exit
+fi
+
+#######################################################################
+###			default values
+#######################################################################
+export configfile_dir=${configdir}/savedir
+export configfile=${configdir}/config
+configfile_dspeed=${configdir}/downspeed
+
+[ -f "$configfile" ] && . ${configfile}
+[ -f "$configfile_dspeed" ] && read -r DOWNLOADSPEED < $configfile_dspeed
+
+[ ! "$DOWNLOAD_DIR" ] && DOWNLOAD_DIR="$HOME" ##default
+[ ! "$FILEFMT" ] && FILEFMT="%(title)s_%(format)s__%(id)s.%(ext)s" ##default %(title)s-%(id)s.%(ext)s
+[ ! "$ALLOW_PLAYLIST" ] && ALLOW_PLAYLIST="FALSE" ##default
+[ ! "$NOFORMATINFILENAME" ] && NOFORMATINFILENAME="FALSE" ##default
+[ ! "$NOIDINFIFILENAME" ] && NOIDINFIFILENAME="FALSE" ##default
+[ ! "$DOWNLOADLIMIT" ] && DOWNLOADLIMIT="FALSE" ##default
+[ ! "$DOWNLOADSPEED" ] && DOWNLOADSPEED="50" ##default
+[ ! "$LOGURL" ] && LOGURL="TRUE" ##default
+
+case $DTYPESTR in
+	*low*)		lowx='^'	;; #LQ
+	*720p*)		high720p='^';; #HD
+	*1080p*)	high1080p='^';; #HD - requires ffmpeg to mux audio/video
+	*audio*)	audiox='^'	;; #AUDIO
+	*formats*)	formatx='^'	;; #FORMATS - check formats
+	*)		 	lowx='^'	;; ##default
+esac
+LOWSTR='Download low quality video'
+HD720p='Download 720p HD video'
+HD1080p='Download 1080p HD video'
+AUDIOSTR='Download audio stream only'
+CHECKSTR='Check available video formats'
+typecombo="${lowx}${LOWSTR}!${high720p}${HD720p}!${high1080p}${HD1080p}!${audiox}${AUDIOSTR}!${formatx}${CHECKSTR}"
+#echo "$typecombo"
+
+#######################################################################
+###				LOCK
+#######################################################################
+if [ -e "${configdir}/.lock" ] && [ ! "$ZLIST" ] ; then
+	if [ -f "${configdir}/zlist" ] ; then
+		yad --title="In batch mode" --center --image=gtk-dialog-error \
+			--text="Sorry, youtubedl now is in batch mode, please wait until the last link is processed..." \
+			--button="Show main dialog:0" \
+			--button="Force remove lock:1" \
+			--button="Pause after current download:2" \
+			--window-icon=${youtube_png}
+		case $? in
+			0) 	DIALOGONLY='TRUE' ; VID="ZZZ" ;;
+			1)  rm -f ${configdir}/.lock ; exit ;;
+			2)	touch $configdir/.stop ; exit ;;
+			*)	exit ;;
+		esac
+	else
+		echo "Deleting ${configdir}/.lock"
+		rm -f "${configdir}/.lock"
+	fi
+fi
+########################################################################
+
+if [ ! "$DIALOGONLY" ] ; then
+
+  if [ "$LAST" ] ; then
+	VID=$(LastURL)
+	[ ! "$VID" ] && echo "ERROR: no input url" && exit 1
+	[ "$LASTURL" ] && echo "* youtubedl: will use $LASTURL"
+  else
+	VID="$@"
+  fi
+
+  ##########################################################
+  ##### through a text file containing URLs
+  if [ -f "$VID" ] ; then
+	mkdir -p "$configdir"
+	if [ "$DISPLAY" ] ; then
+		yad --title "youtubedl" --text=" ${VID##*/} \n\n Is this a text file containing URLs? If so, would like to add them to the download queue?" \
+			--button=gtk-yes:0 --button=gtk-no:1 --center --window-icon=${youtube_png}
+		if [ $? -eq 0 ] ; then
+			cat "$VID" >> "${configdir}/zlist"
+			youtubedl &
+		fi
+		exit 0
+	fi
+  fi
+
+  ###########################################################
+  #check for queue
+  if [ ! "$VID" ] && [ -f "${configdir}/zlist" ] ; then
+	read -r VID < ${configdir}/zlist #read first line
+	if [ "$VID" ] ; then
+		sed -i '1d' ${configdir}/zlist #delete first line
+		QUEUE=1
+		QUEUESTR='youtubedl -zzzlist'
+		QUEUEWAIT='sleep 5'
+		AUTO=1
+	else 
+		rm -f ${configdir}/zlist
+		rm -f ${configdir}/.lock
+	fi			
+  fi
+  [ "$QUEUE" ] && touch ${configdir}/.lock
+
+fi
+
+CHECKID=0
+
+#######################################################################
+#######################################################################
+
+[ "$VID" = "" ] && [ "$ZLIST" ] && exit 1
+[ "$DIALOGONLY" ] && VID="" && zLBL=":LBL"
+[ ! "$DISPLAY" ] && AUTO=1
+
+if [ $AUTO -eq 1 ]; then 
+	[ "$VID" = "" ] && echo "$0 ERROR: no video url specified" && exit 1
+	if [ -f "$youtubedl_extra" ] ; then
+		#zvid=$(youtubedl-extra $VID)
+		zvid=$(bash $youtubedl_extra $VID)
+		case $? in
+			5) VID=$zvid ;;
+			10) exit 1 ;;
+			15) VID="" ; geany "${configdir}/zlist" & ;;
+		esac
+	fi
+else
+
+DIALOGX=1
+if [ ! "$DIALOGONLY" ] ; then
+	if [ "$VID" = "" ]; then
+		VID="$(xclip -selection clipboard -o)"
+		case $VID in
+			http://*|https://*|www.*) isok=1;;
+			*.com/*|*.net/*|*.be/*) isok=1;;
+			search?*) isok=1;;
+			*) isok=0 ;;
+		esac
+		if [ $isok -eq 0 ] ; then
+			VID=""
+		else
+			if [ -f "$youtubedl_extra" ] ; then
+				zvid=$(bash $youtubedl_extra $VID)
+				case $? in
+					5) VID=$zvid ;;
+					10) exit 1 ;;
+					15) VID="" ; geany "${configdir}/zlist" & ;;
+				esac
+			fi
+		fi
+	  fi
+	fi
+	
+	if [ "$MPV" ] ; then
+		tapp=mpv
+	else
+		tapp=youtubedl
+	fi
+	
+	#width='--width=400'
+	dialog_result=$(yad --title="$tapp $HEREMSG" $width \
+		--center --fixed --columns="2" --buttons-layout="center" \
+		--window-icon=${youtube_png} \
+		--separator="\n" --form  \
+		--field="URL${zLBL}" "$VID" \
+		--field="DIR:DIR" "$DOWNLOAD_DIR" \
+		--field="Open Download Directory:btn" "$rox %2" \
+		--field="Output File::LBL" "@disabled" \
+		--field="name" "$FILEFMT" \
+		--field="type:CB" "$typecombo" \
+		--field="Allow playlists:CHK" "$ALLOW_PLAYLIST" \
+		--field="Don't include format info in filename:CHK" "$NOFORMATINFILENAME" \
+		--field="Don't include video id in filename:CHK" "$NOIDINFIFILENAME" \
+		--field="Limit download speed::CHK" "$DOWNLOADLIMIT" \
+		--field="KB" "$DOWNLOADSPEED" \
+		--field="Log URLs:CHK" "$LOGURL" \
+		--button=gtk-ok:0 \
+		--button=gtk-cancel:1 \
+		--button="Batch...:bash -c LINKLIST" \
+		--button="View Log:geany $configdir/zlog.ok $configdir/zlog.err" \
+		--button="Update:bash -c UPDATE"
+	)
+	
+	[ $? -ne 0 ] || [ "$dialog_result" = "" ] && echo "User cancelled operation" && exit 2
+
+	x=1
+	while read fieldvalue; do
+		[ $x -eq 1 ] && VID="$fieldvalue"
+		[ $x -eq 2 ] && DOWNLOAD_DIR="$fieldvalue"
+		[ $x -eq 5 ] && FILEFMT="$fieldvalue"
+		[ $x -eq 6 ] && DTYPESTR="$fieldvalue"
+		[ $x -eq 7 ] && ALLOW_PLAYLIST="$fieldvalue"
+		[ $x -eq 8 ] && NOFORMATINFILENAME="$fieldvalue"
+		[ $x -eq 9 ] && NOIDINFIFILENAME="$fieldvalue"
+		[ $x -eq 10 ] && DOWNLOADLIMIT="$fieldvalue"
+		[ $x -eq 11 ] && DOWNLOADSPEED="$fieldvalue"
+		[ $x -eq 12 ] && LOGURL="$fieldvalue" 
+		let x++
+	done <<< "$dialog_result" #use this method instead of a pipe (problem with variables)
+
+	[ ! -d "$configdir" ] && rm -f $configdir && mkdir -p $configdir
+
+	echo -e "---Res:\n$dialog_result\n\n---Values:\n$DOWNLOAD_DIR\n$FILEFMT\n---"
+	echo "DOWNLOAD_DIR=\"$DOWNLOAD_DIR\"
+FILEFMT=\"$FILEFMT\"
+DTYPESTR=\"$DTYPESTR\"
+ALLOW_PLAYLIST=\"$ALLOW_PLAYLIST\"
+DOWNLOADLIMIT=\"$DOWNLOADLIMIT\"
+NOFORMATINFILENAME=\"$NOFORMATINFILENAME\"
+NOIDINFIFILENAME=\"$NOIDINFIFILENAME\"
+LOGURL=\"$LOGURL\"
+" > ${configfile}
+fi
+
+#####/ test if variable is a number
+case "$DOWNLOADSPEED" in
+	"0") true ;; #0. no download limit
+	''|*[!0-9]*) true ;; #invalid number, no download limit
+	*) ITSNUMBER=1 ;; #valid number
+esac
+if [ "$ITSNUMBER" ] ; then
+	[ "$DIALOGX" ] && echo "$DOWNLOADSPEED" > ${configfile_dspeed}
+	if [ "$DOWNLOADLIMIT" = "TRUE" ] ; then
+		LIMITSTR="-r $((DOWNLOADSPEED * 1024))" #kilobytes
+	fi
+else
+	echo "Download speed: $DOWNLOADSPEED not valid"
+fi
+
+#########################
+[ "$DIALOGONLY" ] && exit 
+#########################
+
+## check for queue again
+if [ ! "$VID" ] ; then
+	if [ -f ${configdir}/zlist ] ; then
+		read -r VID < ${configdir}/zlist #read first line
+		if [ "$VID" ] ; then
+			echo "$0 : found an URL in ${configdir}/zlist"
+			$0 &
+			exit 
+		fi
+	fi
+	echo "$0 ERROR: no video url specified" 
+	exit 1 
+fi
+
+#######################################################################
+#######################################################################
+
+AUDIOQUALITYOPT='--format 141/140'
+
+#Video: 22=HD 18=MP4, 43=WEBM, 5=FLV
+#Audio Only: 140=128k 141=256k
+case $DTYPESTR in
+	*low*)   QUALITYOPT='--format 18/43/5'  ;;
+	*720p*)  QUALITYOPT='--format 22/18/43/5';;
+	*1080p*)
+		#QUALITYOPT='--format 299/137' #dash video 1080p
+		QUALITYOPT='--format 134' #dash video 1080p
+		FFMPEG=yes
+		;;
+	*audio*)
+		QUALITYOPT=$AUDIOQUALITYOPT
+		FILEFMT=${FILEFMT//%(ext)s/aac}
+		;;
+	*formats*)
+		QUALITYOPT='--list-formats'
+		CHECKFORMATS="TRUE"
+		CHECKFSTR="echo -n 'PRESS ENTER KEY TO CLOSE THIS WINDOW: ' ; read var" 
+		;;
+	*)
+		QUALITYOPT='--format 18/43/5'
+		;;
+esac
+MPVQ=${QUALITYOPT#--}
+MPVQ=${MPVQ// /=}
+echo "MPVQ=$MPVQ"
+
+[ "$NOFORMATINFILENAME" = "TRUE" ] && FILEFMT=${FILEFMT//_%(format)s/}
+[ "$NOIDINFIFILENAME" = "TRUE" ] && FILEFMT=${FILEFMT//__%(id)s/}
+
+embedsubs='--embed-subs'
+DEFOPTS='--ignore-config --prefer-ffmpeg --no-part --all-subs --no-check-certificate --user-agent="'${useragent}'" --no-playlist --console-title'
+MPVOPT="--ytdl-raw-options=no-playlist=,no-check-certificate=" #--ytdl-raw-options=format,username=user,password=pas
+YTOPT='--no-check-certificate'
+[ "$ALLOW_PLAYLIST" != "TRUE" ] && YTOPT+=' --no-playlist'
+
+#check for -last setting and youtube video ID	
+case $VID in
+	*/*) true;; #http://*|https://*|www.*|*/*) true;;
+	last|-last) 
+		VID=$(LastURL) 
+		[ ! "$VID" ] && echo "ERROR: no input url" && exit 1
+		[ "$LASTURL" ] && echo "* youtubedl: will use $LASTURL"
+		;;
+	*) #find out if it's a youtube video id
+		if [ $AUTO -eq 1 ] ; then
+			VID='http://www.youtube.com/watch?v='${VID}
+		else
+			x=0 ;  for word in ${VID} ; do let x++ ; done
+			if [ $x -eq 1 ] ; then #verify only if string contains only 1 word
+				yad --title="Confirm" --text="Is this a youtube video id?: $VID " \
+					--center --fixed --borders="4" --button="Yes:0" --button="No:1" --window-icon=${youtube_png}
+				if [ $? -eq 0 ] ; then
+					VID='http://www.youtube.com/watch?v='${VID}
+				else
+					echo "User cancelled operation"
+					exit 1
+				fi
+			fi
+		fi
+esac
+
+#misc fixes
+case $VID in *youtu.be*) VID="https://www.youtube.com/watch?v=${VID##*/}" ;; esac
+case $VID in
+	*youtube.com*)
+		QUALITYOPT="$LIMITSTR $DEFOPTS $QUALITYOPT"
+		MPVOPT="$MPVOPT,$MPVQ"
+		;;
+	search?*|"s "*|"S "*) 
+		QUALITYOPT="$LIMITSTR $DEFOPTS $QUALITYOPT"
+		VID=${VID#search }
+		VID=${VID#s }
+		VID=${VID#S }
+		VID=${VID# }
+		SEARCHSTR=$VID
+		SEARCH=1
+		VID="ytsearch:${VID}"
+		MPVOPT="$MPVOPT,$MPVQ"
+		;;
+	*)	#ignore format info & video id for sites other than youtube
+		FILEFMT=${FILEFMT//_%(format)s/}
+		FILEFMT=${FILEFMT//__%(id)s/}
+		QUALITYOPT="$LIMITSTR $DEFOPTS"
+		#MPVOPT=''
+		;;
+esac
+
+
+#######################################################################
+#######################################################################
+
+function do_ytdl() {
+
+	[ "$LOGURL" = 'TRUE' ] && echo -n "$VID" > $configdir/lasturl #record last url for future reference.
+
+	####
+	[ "$HERE" ] && DOWNLOAD_DIR=${CURDIR}
+	####
+
+	if [ $AUTO -eq 1 ] && [ ! "$DISPLAY" ] ; then ##auto
+
+		EXECCOMMAND="python ${youtube_dl} $QUALITYOPT -o \"${DOWNLOAD_DIR}/${FILEFMT}\" $VID"
+		echo "Video: $VID"
+		echo "Dir: ${DOWNLOAD_DIR}"
+		echo
+		echo ${EXECCOMMAND}
+		echo
+		eval ${EXECCOMMAND}
+		exitcode=$? 
+		echo -e "\nExit code: $exitcode"
+		exit $exitcode
+	
+	else ##from dialog## - AUTO WITH X
+
+		SCRIPTFILE="/tmp/youtube_dl_${RANDOM}.sh"
+	
+		if [ "$MPV" ] ; then
+			echo "#!/bin/sh
+LOGURL=\"$LOGURL\"
+function cleanup() {  rm -f $SCRIPTFILEX ; }
+trap \"cleanup\" INT TERM EXIT KILL
+if [ \"$SEARCH\" ] ; then
+	echo searching in youtube: $SEARCHSTR
+	VID=\$(python ${youtube_dl} $YTOPT -g \"ytsearch:$SEARCHSTR\" 2>/dev/null | head -1)
+	if [ ! \"\$VID\" ] ; then
+		echo 'ERROR: no results'
+		exit 1
+	fi
+fi
+echo mpv --ytdl $MPVOPT \"$VID\"
+mpv --ytdl $MPVOPT \"$VID\"
+$QUEUEWAIT
+$QUEUESTR
+#read xxx
+cleanup ; exit
+" > $SCRIPTFILE
+			chmod +x $SCRIPTFILE
+			xterm -title mpv -e $SCRIPTFILE
+
+		####
+		else
+			EXECCOMMAND="python ${youtube_dl} $QUALITYOPT \"$VID\" -o \"${DOWNLOAD_DIR}/${FILEFMT}\""
+			echo $EXECCOMMAND
+	
+			echo "#!/bin/sh
+LOGURL=\"$LOGURL\"
+function cleanup() {  rm -f $SCRIPTFILE ; }
+trap \"cleanup\" INT TERM EXIT KILL
+echo \"Video: $VID\"
+echo \"Dir: ${DOWNLOAD_DIR}\"
+echo
+echo ${EXECCOMMAND}
+echo
+$QUEUEWAIT
+$EXECCOMMAND
+exitcode=\$?
+if [ \$exitcode -ne 0 ]; then
+	[ \"\$LOGURL\" = 'TRUE' ] && echo \"$VID\" >> $configdir/zlog.err
+	echo ; echo \"Exit code: \$exitcode\"
+	echo 'Type A and hit enter to remove '${configdir}/zlist
+	echo 'Type P and hit enter to stop downloads'
+	echo 'THERE WAS AN ERROR. PRESS ENTER KEY TO CLOSE THIS WINDOW '
+	read -t 10 var #read -t 30 var (tiemout)
+	case \$var in 
+		a|A) rm -f ${configdir}/zlist ;; 
+		p|P) touch $configdir/.stop ; rm $configdir/.lock ;;
+	esac
+	$QUEUESTR
+else
+	[ \"\$LOGURL\" = 'TRUE' ] && echo \"$VID\" >> $configdir/zlog.ok
+	rm -f $configdir/lasturl #successful download, do no record as last url
+	$QUEUESTR
+	$CHECKFSTR
+fi
+cleanup
+exit \$exitcode
+" > $SCRIPTFILE
+			chmod +x $SCRIPTFILE
+			lxterminal --title="youtubedl $VID" -e $SCRIPTFILE
+		fi
+	fi
+}
+
+wait_for_job_2_finish() {
+	while [ 1 ]
+	do
+		sleep 5
+		[ ! -f $SCRIPTFILE ] && break
+	done
+}
+
+#######################################################################
+#######################################################################
+
+if [ "$FFMPEG" = "yes" ] ; then
+	DOWNLOAD_DIRB=$DOWNLOAD_DIR
+	DOWNLOAD_DIR=$DOWNLOAD_DIR/.tmp$$
+	do_ytdl #dl video
+	wait_for_job_2_finish
+	QUALITYOPT=$AUDIOQUALITYOPT
+	do_ytdl #dl audio
+	wait_for_job_2_finish
+	video=$(cd "$DOWNLOAD_DIR" ; ls *.mp4)
+	audio=$(cd "$DOWNLOAD_DIR" ; ls *.m4a)
+	if [ "$audio" -a "$video" ] ; then
+		ffmpeg -i "$DOWNLOAD_DIR/$video" -i "$DOWNLOAD_DIR/$audio" \
+			-c:v copy -c:a copy "$DOWNLOAD_DIRB/$video"
+	fi
+	echo rm -rf $DOWNLOAD_DIR
+else
+	do_ytdl
+fi
+
+### END ###

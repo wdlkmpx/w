@@ -1,0 +1,47 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+# ====================================================
+
+URL=http://ftp.gnu.org/gnu/grep
+SRC=grep
+PKG=grep_static
+VER=3.6
+COMP=tar.xz
+DESC=""
+DEPS=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='bin/grep'
+
+build() {
+	cd ${SRC}-${VER}
+
+	EXE='src/grep'
+	opts='--prefix=/usr --bindir=/bin --disable-nls --disable-perl-regexp'
+	# http://buildroot-busybox.2317881.n4.nabble.com/PATCH-grep-fix-build-failure-for-musl-td84536.html
+	opts+=' --with-included-regex'
+	_configure
+	_make ${MKFLG} LDFLAGS=-static
+
+	abort_if_file_not_found ${EXE}
+	_strip ${EXE}
+
+	standard_make_install
+}
+
+# main
+retrieve ${SRC}-${VER}.${COMP}
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup

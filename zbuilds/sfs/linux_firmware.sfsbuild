@@ -1,0 +1,56 @@
+#!/bin/sh
+# 
+# https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git
+# https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/
+#
+
+S_COMP="-comp gzip" #xz gzip lzo lz4
+
+FVER=20210315
+#URL=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/snapshot/linux-firmware-${FVER}.tar.gz
+URL='https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/+archive/3568f962908cd9be9128de5cb732f4f58880a41f.tar.gz'
+FILE=linux-firmware-${FVER}.tar.gz
+BASENAME=${FILE%.tar*}
+
+mkdir -p tmp
+(
+cd tmp
+if ! [ -f "$FILE" ] ; then
+	wget -O "$FILE" --no-check-certificate "$URL"
+	if [ $? -ne 0 ] ; then
+		rm -f $FILE
+		exit 1
+	fi
+fi
+)
+
+PKGDIR=${PWD}/${BASENAME//linux-firmware/linux_firmware}
+
+case $URL in *googlesource*)
+	# google's tarball does not contain $BASENAME as the main dir inside tarball
+	mkdir -p ${BASENAME}
+	tardir="--directory=$BASENAME"
+	;;
+esac
+
+if ! tar -xf tmp/${FILE} $tardir ; then
+	exit
+fi
+
+rm -rf ${PKGDIR}
+mkdir -p ${PKGDIR}
+
+cd ${BASENAME}
+make DESTDIR=${PKGDIR} install
+cd ..
+
+mksquashfs ${PKGDIR} ${PKGDIR}.sfs ${S_COMP}
+sha256sum ${PKGDIR}.sfs > ${PKGDIR}.sfs.sha256.txt
+
+sync
+rm -rf ${PKGDIR}
+rm -rf ${BASENAME}
+
+mv ${PKGDIR}.sfs* output/
+
+### END ###

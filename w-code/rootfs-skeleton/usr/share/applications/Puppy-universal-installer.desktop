@@ -1,0 +1,10 @@
+[Desktop Entry]
+Encoding=UTF-8
+Name=P-installer
+Icon=/usr/share/pixmaps/puppy/power.svg
+Comment=Install
+Exec=/usr/sbin/dotpup1
+Terminal=false
+Type=Application
+Categories=X-SetupUtility
+GenericName=P-installer

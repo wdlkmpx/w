@@ -1,0 +1,59 @@
+# xlockmore
+
+. ../func
+. ../build.conf
+
+URL=http://distro.ibiblio.org/puppylinux/sources/x
+PKG=xlockmore
+VER=5.31-patched
+COMP=tar.gz
+DESC="Lock the screen"
+DEPS=
+CAT=BuildingBlock
+DESKTOP=xlockmore-5.31.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+build() {
+	cd ${PKG}-${VER}
+	#bummer, doesn't support DESTDIR, so we try and trick it!
+	mkdir $CWD/${PKG}-install
+	XLOCKLIBS="-laudiofile -lcrypt" \
+				./configure --prefix=$CWD/${PKG}-install/usr \
+				--localstatedir=/var \
+				--sysconfdir=/etc \
+				--libdir=/usr/${LIBDIR} \
+				--enable-xlockrc \
+				--without-motif \
+				--without-editres \
+				--without-gltt \
+				--without-ftgl \
+				--without-opengl \
+				--without-mesa \
+				--without-dtsaver \
+				--without-rplay \
+				--without-nas \
+				--enable-nice-only 
+	[ "$?" -eq 0 ] || exit
+	make $MKFLG
+	[ "$?" -eq 0 ] || exit
+	make install
+	cd -
+}
+	
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

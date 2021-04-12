@@ -1,0 +1,47 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+source_vesions
+
+# ====================================================
+
+SRC=dmidecode
+PKG=dmidecode_static
+VER=${dmidecode_ver}
+URL=http://download.savannah.gnu.org/releases/dmidecode
+COMP=tar.xz
+DESC=""
+DEPS=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='usr/sbin/dmidecode'
+
+build() {
+	cd ${SRC}-${VER}
+
+	EXE=dmidecode
+	sed -i 's%/usr/local%/usr%' Makefile
+	_make
+
+	abort_if_file_not_found ${EXE}
+	_strip ${EXE}
+
+	standard_make_install
+}
+
+# main
+retrieve "${SRC}-${VER}.${COMP}"
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup
+

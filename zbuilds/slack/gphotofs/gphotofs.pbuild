@@ -1,0 +1,39 @@
+# gphotofs
+
+. ../func
+. ../build.conf
+
+URL=http://downloads.sourceforge.net/project/gphoto/gphotofs/0.5.0
+PKG=gphotofs
+VER=0.5
+COMP=tar.bz2
+DESC="gphotofs is a FUSE filesystem module to mount your camera as a filesystem on Linux"
+DEPS=+fuse
+CAT=BuildingBlock
+DESKTOP=gphotofs.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+(
+	cd ${PKG}-${VER}
+	for i in ../*.patch
+	do
+		patch -p1 < $i
+	done
+)
+build_configure $PKG $VER $LIBDIR
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

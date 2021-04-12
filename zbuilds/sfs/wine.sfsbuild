@@ -1,0 +1,206 @@
+#!/bin/sh
+# specific stable versions:
+# ./wine.sfsbuild 5
+
+# slackware 14.2 wine package from sourceforge
+
+# https://sourceforge.net/projects/wine/files/Slackware%20Packages
+WINE_VER=6.0                      # wine-5.0.rc3-i686-1sg.txz 
+WINE_VER_DIR=${WINE_VER//.rc/-rc} # 5.0.rc3 -> 5.0-rc3
+
+DL_64=1 # comment out to ignore 64 bit wine
+
+# https://github.com/madewokherd/wine-mono/releases
+MONO_VER=5.1.1
+wine_mono_tarball="wine-mono-${MONO_VER}-x86.tar.xz"
+
+# http://dl.winehq.org/wine/wine-gecko/
+GECKO_VER=2.47.2
+wine_gecko_x86=wine-gecko-${GECKO_VER}-x86.tar.xz
+wine_gecko_x86_64=wine-gecko-${GECKO_VER}-x86_64.tar.xz
+
+#=====================================================
+
+#. /etc/os-release
+
+PARAM=$1
+ID='slack14.2'
+
+if [ "$PARAM" = "stretch" ] ; then
+	ID=w_pstretch
+	PARAM=5
+fi
+
+if [ "$PARAM" = "5" ] ; then #|| [ "$ID" = "w_pstretch" ] ; then
+	WINE_VER=5.0.3
+	WINE_VER_DIR=${WINE_VER//.rc/-rc} # 5.0.rc3 -> 5.0-rc3
+	echo "WINE $WINE_VER stable release"
+	sleep 2
+	MONO_VER=4.9.4
+	GECKO_VER=2.47.1
+	wine_mono_tarball="wine-mono-bin-${MONO_VER}.tar.gz"
+	DL_64=1
+	[ "$ID" = "w_pstretch" ] && unset DL_64
+fi
+
+# WINE_VER=4.0.4
+# wine_gecko_x86=wine_gecko-2.47-x86.msi
+# wine_gecko_x86_64=wine_gecko-2.47-x86_64.msi
+
+# WINE_VER=3.0.5
+# wine_gecko_x86=wine_gecko-2.44-x86.msi
+# wine_gecko_x86_64=wine_gecko-2.44-x86_64.msi
+
+#=====================================================
+
+OUTPUT_DIR=${PWD}/output
+mkdir -p ${PWD}/output
+
+S_COMP="-comp gzip" #xz gzip lzo lz4
+
+#=====================================================
+
+download () {
+	url="$1"
+	file="$2"
+	if ! [ "$file" ] ; then
+		file=$(basename "$url")
+	fi
+	if [ -f "$file" ] ; then
+		echo "$file already downloaded"
+		return
+	fi
+
+	# must not use useragent with some sites
+	case $url in
+	*sourceforge*) wget --content-disposition -E --no-check-certificate -O "$file" "$url" ;;
+	*) wget --content-disposition -E --no-check-certificate --user-agent="${useragent}" -O "$file" "$url" ;;
+	esac
+
+	if [ $? -ne 0 ] ; then
+		echo "*** ERROR: failed to download $file"
+		rm -f "$file"
+		exit 1
+	fi
+}
+
+#=====================================================
+
+mkdir -p pkg
+cd pkg
+
+WINE32_DIR=${PWD}/wine-${WINE_VER}-${ID}_i686
+WINE64_DIR=${PWD}/wine-${WINE_VER}-${ID}_x86_64
+mkdir -p ${WINE32_DIR}
+mkdir -p ${WINE64_DIR}
+
+if [ "$wine_mono_tarball" ] ; then
+	download https://github.com/madewokherd/wine-mono/releases/download/wine-mono-${MONO_VER}/${wine_mono_tarball}
+fi
+
+download http://dl.winehq.org/wine/wine-gecko/${GECKO_VER}/${wine_gecko_x86}
+
+if [ "$DL_64" ] ; then
+	download http://dl.winehq.org/wine/wine-gecko/${GECKO_VER}/${wine_gecko_x86_64}
+fi
+
+#if [ "$ID" = "w_pstretch" ] ; then
+#	download https://dl.winehq.org/wine-builds/debian/dists/stretch/main/binary-i386/wine-stable-dev_${WINE_VER}~stretch_i386.deb
+#	download https://dl.winehq.org/wine-builds/debian/dists/stretch/main/binary-i386/wine-stable-i386_${WINE_VER}~stretch_i386.deb
+#	download https://dl.winehq.org/wine-builds/debian/dists/stretch/main/binary-i386/wine-stable_${WINE_VER}~stretch_i386.deb
+#else
+	download  https://sourceforge.net/projects/wine/files/Slackware%20Packages/${WINE_VER_DIR}/i686/wine-${WINE_VER}-i686-1sg.txz
+	if [ "$DL_64" ] ; then
+		download https://sourceforge.net/projects/wine/files/Slackware%20Packages/${WINE_VER_DIR}/x86_64/wine-${WINE_VER}-x86_64-1sg.txz
+	fi
+#fi
+
+#=====================================================
+#wine64
+
+if [ "$DL_64" ] ; then
+	mkdir -p ${WINE64_DIR}/usr/share/wine/mono
+	mkdir -p ${WINE64_DIR}/usr/share/wine/gecko
+
+	if [ "${wine_gecko_x86_64}" ] ; then
+		tar -C ${WINE64_DIR}/usr/share/wine/gecko -xf ${wine_gecko_x86_64}
+	fi
+	if [ "$wine_mono_tarball" ] ; then
+		tar -C ${WINE64_DIR}/usr/share/wine/mono -xf ${wine_mono_tarball}
+	fi
+	if [ "$ID" = "w_pstretch" ] ; then
+		dpkg-deb -x wine-stable-dev_${WINE_VER}~stretch_i386.deb ${WINE32_DIR}
+		dpkg-deb -x wine-stable-i386_${WINE_VER}~stretch_i386.deb ${WINE32_DIR}
+		dpkg-deb -x wine-stable_${WINE_VER}~stretch_i386.deb ${WINE32_DIR}
+	else
+		tar -C ${WINE64_DIR} -xf wine-${WINE_VER}-x86_64-1sg.txz
+		(
+			cd ${WINE64_DIR}
+			sh install/doinst.sh
+			rm -rf install
+		)
+	fi
+	#cp -a fonts ${WINE64_DIR}/usr/share/wine
+	rm -f ${WINE64_DIR}/usr/share/applications/mimeinfo.cache
+	if [ -f ${WINE64_DIR}/usr/share/applications/wine.desktop ] ; then
+		# slackbuild
+		sed -i 's/%f//' ${WINE64_DIR}/usr/share/applications/wine.desktop
+		sed -i 's%Categories=.*%Categories=System%' ${WINE64_DIR}/usr/share/applications/winecfg.desktop
+		sed -i '/NoDisplay/d ; /Categories/d' ${WINE64_DIR}/usr/share/applications/wine.desktop
+		echo 'NoDisplay=true' >> ${WINE64_DIR}/usr/share/applications/wine.desktop
+	fi
+fi
+
+#=====================================================
+#wine32
+
+mkdir -p ${WINE32_DIR}/usr/share/wine/mono
+mkdir -p ${WINE32_DIR}/usr/share/wine/gecko
+
+if [ "$wine_gecko_x86" ] ; then
+	tar -C ${WINE32_DIR}/usr/share/wine/gecko -xf ${wine_gecko_x86}
+fi
+if [ "$wine_mono_tarball" ] ; then
+	tar -C ${WINE32_DIR}/usr/share/wine/mono -xf ${wine_mono_tarball}
+fi
+
+if [ "$ID" = "w_pstretch" ] ; then
+	dpkg-deb -x wine-stable-dev_${WINE_VER}~stretch_i386.deb ${WINE32_DIR}
+	dpkg-deb -x wine-stable-i386_${WINE_VER}~stretch_i386.deb ${WINE32_DIR}
+	dpkg-deb -x wine-stable_${WINE_VER}~stretch_i386.deb ${WINE32_DIR}
+	mkdir -p ${WINE32_DIR}/usr/bin/
+	for i in $(ls ${WINE32_DIR}/opt/wine-stable/bin/)
+	do
+		ln -sv /opt/wine-stable/bin/${i} ${WINE32_DIR}/usr/bin/${i}
+	done
+else
+	tar -C ${WINE32_DIR} -xf wine-${WINE_VER}-i686-1sg.txz
+	(
+		cd ${WINE32_DIR}
+		sh install/doinst.sh
+		rm -rf install
+	)
+fi
+
+#=====================================================
+
+#cp -a fonts ${WINE32_DIR}/usr/share/wine
+rm -f ${WINE32_DIR}/usr/share/applications/mimeinfo.cache
+if [ -f ${WINE32_DIR}/usr/share/applications/wine.desktop ] ; then
+	# slackbuild
+	sed -i 's/%f//' ${WINE32_DIR}/usr/share/applications/wine.desktop
+	sed -i 's%Categories=.*%Categories=System%' ${WINE32_DIR}/usr/share/applications/winecfg.desktop
+	sed -i '/NoDisplay/d ; /Categories/d' ${WINE32_DIR}/usr/share/applications/wine.desktop
+	echo 'NoDisplay=true' >> ${WINE32_DIR}/usr/share/applications/wine.desktop
+fi
+
+mksquashfs ${WINE32_DIR} ${WINE32_DIR}.sfs ${S_COMP}
+if [ "$DL_64" ] ; then
+	mksquashfs ${WINE64_DIR} ${WINE64_DIR}.sfs ${S_COMP}
+fi
+
+mv ${WINE32_DIR}.sfs ${OUTPUT_DIR}
+if [ "$DL_64" ] ; then
+	mv ${WINE64_DIR}.sfs ${OUTPUT_DIR}
+fi
+

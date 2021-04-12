@@ -1,0 +1,462 @@
+#!/bin/bash
+
+set -x
+
+cleanup() {
+	if [ "${DCHROOT}" != "" -a -d "${DCHROOT}" ] ; then
+		umount ${DCHROOT}/sys     2>/dev/null
+		umount ${DCHROOT}/proc    2>/dev/null
+		umount ${DCHROOT}/dev/pts 2>/dev/null
+		umount ${DCHROOT}/dev     2>/dev/null
+	fi
+}
+trap "cleanup" SIGINT SIGTERM EXIT
+
+if [ -f debootstrap.conf ] ; then # debootstrap.conf in current dir
+	# example:
+	#DVERSION=jessie
+	#DLOCALE="en_US.UTF-8 UTF-8"
+	#DTIMEZONE="GMT"
+	#DPASSWORD=12345
+	#DDESKTOP=lxde
+	echo Using debootstrap.conf
+	. ./debootstrap.conf
+	sleep 1
+fi
+
+#============================================================
+
+if [ "$DISPLAY" ] ; then
+	GUI=1
+else
+	GUI=
+fi
+
+case $1 in
+	cli|-cli|--cli) GUI= ;;
+	gui|-gui|--gui) GUI=1;;
+esac
+
+if [ "$GUI" ] ; then
+	MENU='--menubox'
+	DIALOG='Xdialog --wmclass gtkdialog2 --screen-center --cr-wrap'
+	WHH='18 80 15'
+else
+	MENU='--menu'
+	DIALOG='dialog'
+	WHH='0 0 0'
+fi
+
+which ${DIALOG%% *} &>/dev/null || exit 1
+
+#============================================================
+
+if [ ! "$DVERSION" ] ; then
+	DVERSION=$(${DIALOG} --stdout \
+		--backtitle "Install debian" --title "Install debian" \
+		${MENU} "Please select Debian version..." 0 0 0 \
+			"wheezy" "" \
+			"jessie" "" \
+			"stretch" "" \
+			"buster" "" \
+			"sid" ""
+	)
+	[ ! "$DVERSION" ] && exit 1
+fi
+
+# this is the part that breaks compatibility
+# woofce's "probedisk" and "probepart" are different
+if [ ! "$DCHROOT" ] ; then
+
+	#--- DRIVE
+	(
+		echo ${DIALOG}' --stdout --backtitle "Install debian" --title "Select drive" \'
+		echo ${MENU}' "Select target drive..." '${WHH}' \'
+		probedisk -plus-size -hr | \
+		while read l; do
+			echo '	"'${l//|/ - }'" "" \'
+		done
+	) > /tmp/dialogdeb
+	DEBDRV=$(bash /tmp/dialogdeb)
+	DRVDEV=$(echo $DEBDRV | cut -f 1 -d ' ')
+	rm -f /tmp/dialogdeb
+	[ ! "$DEBDRV" ] && exit 1
+
+	#--- PARTITION
+	(
+		echo ${DIALOG}' --stdout --backtitle "'${DEBDRV}'" --title "Select partition" \'
+		echo ${MENU}' "" '${WHH}' \'
+		probepart -hr ${DRVDEV}.* | grep -v none | \
+		while read l; do
+			echo '	"'${l//|/ - }'" "" \'
+		done
+	) > /tmp/dialogdeb
+	DEBPART=$(bash /tmp/dialogdeb)
+	PARTDEV=$(echo $DEBPART | cut -f 1 -d ' ')
+	PARTNAME=${PARTDEV##*/} #basename
+	rm -f /tmp/dialogdeb
+	[ ! "$PARTDEV" ] && exit 1
+
+	#--- DIRECTORY
+	MOUNTP=$(mount | grep "^${PARTDEV} " | cut -f 3 -d ' ')
+	if [ "$MOUNTP" ] ; then
+		DCHROOT=$MOUNTP
+	else
+		FS=$(echo $DEBPART | cut -f 2 -d '-')
+		mkdir -p /mnt/${PARTNAME}
+		mount -t $FS /dev/${PARTNAME} /mnt/${PARTNAME} || exit 1
+		DCHROOT=/mnt/${PARTNAME}
+	fi
+fi
+
+if [ ! -d "$DCHROOT" ] ; then
+	echo "Installation directory does not exist..."
+	exit 1
+fi
+
+if [ ! "$WIPE_DCHROOT" ] ; then
+	${DIALOG} --stdout --backtitle "Install debian" --title "Wipe directory" \
+		--defaultno --yesno "Do you want to wipe $DCHROOT ?" 0 0
+	[ $? -eq 0 ] && WIPE_DCHROOT=yes
+fi
+if [ "$WIPE_DCHROOT" = "yes" ] ; then
+	rm -rf $DCHROOT/*
+fi
+
+if [ ! "$DMIRROR" ] ; then
+	DMIRROR='http://ftp.us.debian.org/debian/'
+	#DMIRROR='http://deb.debian.org/debian/'
+fi
+DEBOOT_LOC="${DMIRROR}/pool/main/d/debootstrap"
+DEBOOT_FILE='debootstrap_1.0.89_all.deb'
+
+#============================================================
+
+APT_PKG_CACHE=${DCHROOT}/var/cache/apt #/archives
+
+case $(uname -m) in
+	i?86)   DARCH=i386  ;;
+	x86_64) DARCH=amd64 ;;
+	*)      echo "Not supported" ; exit 1 ;;
+esac
+
+ARCHDIR=${DARCH}-linux-gnu
+
+[ -f ${DVERSION}.tar.gz ] && DVERSION_ARCHIVES=$(pwd)/${DVERSION}.tar.gz
+[ -f ${DVERSION}.tar.xz ] && DVERSION_ARCHIVES=$(pwd)/${DVERSION}.tar.xz
+[ -f ${DVERSION}.tar ]    && DVERSION_ARCHIVES=$(pwd)/${DVERSION}.tar
+
+#============================================================
+
+mkdir -p /tmp/debootstrap
+cd /tmp/debootstrap
+wget ${DEBOOT_LOC}/${DEBOOT_FILE}
+if [ $? -ne 0 ] ; then
+	echo "Failed to download $DEBOOT_FILE"
+	exit 1
+fi
+dpkg-deb -x $DEBOOT_FILE debootstrap
+if [ $? -ne 0 ] ; then
+	echo "Failed to extract $DEBOOT_FILE"
+	exit 1
+fi
+
+DEBOOTSTRAP=$PWD/debootstrap/usr/sbin/debootstrap
+export DEBOOTSTRAP_DIR=$PWD/debootstrap/usr/share/debootstrap
+
+#====
+if [ -f "$DVERSION_ARCHIVES" ] ; then
+	mkdir -p ${APT_PKG_CACHE}
+	tar -v --directory ${APT_PKG_CACHE} -xaf "$DVERSION_ARCHIVES"
+fi
+#====
+
+mkdir -p ${DCHROOT}/etc/apt
+echo "deb ${DMIRROR} ${DVERSION} main contrib non-free" > ${DCHROOT}/etc/apt/sources.list
+
+# /lib is toxic, must include it from LD_LIBRARY_PATH
+FIXED_LDPATH=${LD_LIBRARY_PATH#/lib:}
+FIXED_LDPATH=${FIXED_LDPATH%:/lib}
+FIXED_LDPATH=${FIXED_LDPATH//:\/lib:/:}
+export LC_ALL=C
+
+# ${DCHROOT}/dev must be empty before calling $DEBOOTSTRAP
+#   otherwise an error may happen when mknod is called...
+#   any error = end of operation
+rm -rf ${DCHROOT}/dev
+
+# precaution
+umount ${DCHROOT}/sys     2>/dev/null
+umount ${DCHROOT}/proc    2>/dev/null
+umount ${DCHROOT}/dev/pts 2>/dev/null
+umount ${DCHROOT}/dev     2>/dev/null
+
+$DEBOOTSTRAP --help > help.txt
+env LD_LIBRARY_PATH=${FIXED_LDPATH} LC_ALL=C \
+	$DEBOOTSTRAP \
+	--no-check-gpg \
+	--no-check-certificate \
+	--variant=minbase \
+	--arch=${DARCH} ${DVERSION} ${DCHROOT} \
+	${DMIRROR}
+
+#echo "deb ${DMIRROR} ${DVERSION} main contrib non-free" > ${DCHROOT}/etc/apt/sources.list
+cat > ${DCHROOT}/etc/apt/sources.list <<EOF
+deb ${DMIRROR} ${DVERSION} main contrib non-free
+deb-src ${DMIRROR} ${DVERSION} main contrib non-free
+
+deb ${DMIRROR} ${DVERSION}-updates main contrib non-free
+deb-src ${DMIRROR} ${DVERSION}-updates main contrib non-free
+EOF
+
+if [ "$DVERSION" != "sid" ] ; then
+	cat >> ${DCHROOT}/etc/apt/sources.list <<EOF
+
+deb ${DMIRROR} ${DVERSION}-backports main
+deb-src ${DMIRROR} ${DVERSION}-backports main
+EOF
+fi
+
+CHRDEV=$(mount | grep " ${DCHROOT} " | cut -f 1 -d ' ')
+BLKID=$(blkid "$CHRDEV")
+UUID=$(echo "$BLKID" | grep -o ' UUID=.*' | cut -f 2 -d '"' )
+FS=$(echo "$BLKID" | grep -o ' TYPE=.*' | cut -f 2 -d '"' )
+
+echo "UUID=${UUID} / ${FS} errors=remount-ro 0 1" > ${DCHROOT}/etc/fstab
+printf 'pc\n' >${DCHROOT}/etc/hostname
+printf '127.0.0.1\tpc\n'>>${DCHROOT}/etc/hosts
+cp -f /etc/resolv.conf ${DCHROOT}/etc
+
+mount -t proc none ${DCHROOT}/proc
+mount -t sysfs none ${DCHROOT}/sys
+mount -o bind /dev ${DCHROOT}/dev
+mount -t devpts devpts ${DCHROOT}/dev/pts 
+
+export HOME=/root
+export LC_ALL=C
+
+# add groups fuse and wheel
+chroot ${DCHROOT} addgroup fuse
+chroot ${DCHROOT} addgroup wheel
+
+# create user
+chroot ${DCHROOT} adduser user --gecos ",,," --disabled-password
+chroot ${DCHROOT} usermod -a -G sudo,cdrom,disk,audio,video,plugdev,fuse,wheel user
+
+chroot ${DCHROOT} apt-get update
+chroot ${DCHROOT} apt-get install -y dialog less busybox-static 
+
+#============================================================
+#                   DPASSWORD
+#============================================================
+while [ ! "$DPASSWORD" ] ; do
+	PASS1=$(${DIALOG} --stdout --title "Install debian" --passwordbox "Enter password for root" 0 0)
+	PASS2=$(${DIALOG} --stdout --title "Install debian" --passwordbox "Confirm password" 0 0)
+	if [ "$PASS1" = "$PASS2" ] ; then
+		DPASSWORD=$PASS1
+	else
+		${DIALOG} --stdout --title "Install debian" --msgbox "Passwords do not match! Retry.." 0 0
+	fi
+done
+
+#chroot ${DCHROOT} passwd
+for i in root user ; do
+	echo "echo ${i}:${DPASSWORD} | chpasswd" > ${DCHROOT}/changepass
+	chroot ${DCHROOT} sh /changepass
+	rm -f ${DCHROOT}/changepass
+done
+
+#============================================================
+#                   DLOCALE
+#============================================================
+chroot ${DCHROOT} apt-get install -y locales
+#chroot ${DCHROOT} dpkg-reconfigure locales
+if [ ! "$DLOCALE" ] ; then
+	(
+		echo ${DIALOG}' --stdout --backtitle "Install debian" --title "DLOCALE" \'
+		echo ${MENU}' "Select locale..." '${WHH}' \'
+		cat ${DCHROOT}/etc/locale.gen | grep '[a-z][a-z]_[A-Z][A-Z]' | grep -o '[a-z].*' | \
+		while read line
+		do
+			echo '"'$line'" "" \'
+		done
+	) > /tmp/dialogdeb
+	DLOCALE=$(bash /tmp/dialogdeb)
+	rm -f /tmp/dialogdeb
+fi
+if [ ! "$DLOCALE" ] ; then
+	DLOCALE='en_US.UTF-8 UTF-8'
+fi
+
+sed -i  -e "s|#${DLOCALE}|${DLOCALE}|" \
+		-e "s|# ${DLOCALE}|${DLOCALE}|" ${DCHROOT}/etc/locale.gen
+echo "LANG=${DLOCALE%% *}" > ${DCHROOT}/etc/locale.conf
+chroot ${DCHROOT} locale-gen
+
+#============================================================
+#                      DTIMEZONE
+#============================================================
+if [ ! "$DTIMEZONE" ] ; then
+	(
+		echo ${DIALOG}' --stdout --backtitle "Install debian" --title "TIMEZONE" \'
+		echo ${MENU}' "Select your timezone..." '${WHH}' \'
+		find ${DCHROOT}/usr/share/zoneinfo -type f -o -type l | sort | sed 's%.*/zoneinfo/%%' | \
+		while read line
+		do
+			echo '"'$line'" "" \'
+		done
+	) > /tmp/dialogdeb
+	DTIMEZONE=$(bash /tmp/dialogdeb)
+	rm -f /tmp/dialogdeb
+fi
+if [ "$DTIMEZONE" ] ; then
+	ln -sfv ${DCHROOT}/usr/share/zoneinfo/${DTIMEZONE} ${DCHROOT}/etc/localtime
+fi
+
+#============================================================
+
+case $DARCH in
+	i386)  chroot ${DCHROOT} apt-get install -y linux-image-686-pae linux-headers-686-pae ;;
+	amd64) chroot ${DCHROOT} apt-get install -y linux-image-amd64 linux-headers-amd64     ;;
+esac
+
+#--
+
+for i in gawk dmidecode cdw eject file findutils \
+	hdparm sdparm ifplugd ntfs-3g p7zip-full \
+	pcmciautils time tree usb-modeswitch usb-modeswitch-data \
+	usbutils xz-utils bc fping
+do
+	chroot ${DCHROOT} apt-get install -y $i
+done
+
+#--
+
+for i in wpasupplicant iw ppp dhcpcd5 \
+	wireless-tools net-tools wvdial ca-certificates \
+	alsa-tools alsa-utils alsa-oss
+do
+	chroot ${DCHROOT} apt-get install -y $i
+done
+chroot ${DCHROOT} alsactl init
+
+#--
+
+# these have EULA...
+#firmware-ipw2x00 firmware-ivtv
+	
+for i in firmware-amd-graphics firmware-atheros firmware-bnx2 \
+	firmware-bnx2x firmware-brcm80211 firmware-cavium \
+	firmware-intel-sound firmware-intelwimax \
+	 firmware-iwlwifi firmware-libertas \
+	firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
+	firmware-myricom firmware-netxen firmware-qlogic \
+	firmware-realtek firmware-samsung firmware-siano \
+	firmware-ti-connectivity firmware-ralink firmware-amd-graphics \
+	firmware-b43-installer firmware-b43legacy-installer \
+	zd1211-firmware prism2-usb-firmware-installer bluez-firmware \
+	firmware-ath9k-htc \
+	alsa-firmware-loaders
+do
+	chroot ${DCHROOT} apt-get install -y $i
+done
+
+if [ ! "$DDESKTOP" ] ; then
+	DDESKTOP=$(${DIALOG} --stdout \
+		--backtitle "Install debian" --title "Install debian" \
+		${MENU} "Desktop Environment to be installed
+by running ./finish-debian-install (after reboot)" 0 0 0 \
+			"lxde" "" \
+			"xfce" "" \
+			"gnome" "" \
+			"kde" "" \
+	)
+fi
+
+if [ "$DDESKTOP" ] ; then
+	case $DDESKTOP in
+		lxde)
+			PKGS='lxde lxtask gmrun transmission-gtk mtpaint
+	geany
+	mpv
+	mplayer
+	gnome-mplayer
+	gnome-mpv'
+			;;
+		xfce)  PKGS='xfce4' ;;
+		gnome) PKGS='gnome' ;;
+		kde)   PKGS='kde-full' ;;
+		*) DDESKTOP="" ;;
+	esac
+
+	for i in $PKGS ; do
+		chroot ${DCHROOT} apt-get -d install -y $i
+	done
+
+	(
+		echo '#!/bin/sh'
+		for i in $PKGS ; do
+			echo "apt-get install -y $i"
+		done
+		echo "
+
+	echo If everything went as expected, you should delete this file:
+
+		rm -f /finish-debian-install
+
+	and reboot now..."
+	) > ${DCHROOT}/finish-debian-install
+	chmod +x ${DCHROOT}/finish-debian-install
+fi
+
+# jessie: network-manager overwrites /etc/resolv.conf
+#         must be the last pkg to install
+#chroot ${DCHROOT} apt-get install -y network-manager
+
+# precaution
+cp -f /etc/resolv.conf ${DCHROOT}/etc
+echo "LANG=${DLOCALE%% *}" > ${DCHROOT}/etc/locale.conf
+
+#============================================================
+#--- grub4dos menu
+INITRD=$(ls ${DCHROOT}/boot/initrd* | head -n 1)
+VMLINUZ=$(ls ${DCHROOT}/boot/vmlinuz* | head -n 1)
+INITRD=${INITRD##*/}
+VMLINUZ=${VMLINUZ##*/}
+cat > ${DCHROOT}/grub4dos.menu.entry <<EOF
+title Debian $DVERSION (${CHRDEV##*/}/boot)
+  find --set-root uuid () ${UUID}
+  kernel /boot/${VMLINUZ} root=UUID=${UUID} ro 
+  initrd /boot/${INITRD}
+EOF
+
+#============================================================
+
+umount ${DCHROOT}/sys
+umount ${DCHROOT}/proc
+umount ${DCHROOT}/dev/pts
+umount ${DCHROOT}/dev
+
+THE_END="If everything went as expected, you might want to add
+a custom entry to a grub4dos menu
+
+Open ${DCHROOT}/grub4dos.menu.entry and copy the menu entry
+"
+if [ "$DDESKTOP" ] ; then
+	THE_END="$THE_END
+Reboot, boot into Debian $DVERSION and run:
+
+Log in as user and run
+
+	sudo ./finish-debian-install
+
+The result will be debian + ${DDESKTOP} ...
+"
+fi
+
+${DIALOG} --stdout --title "Finished" --msgbox "$THE_END" 0 0
+
+clear
+echo "$THE_END"
+
+### END ###

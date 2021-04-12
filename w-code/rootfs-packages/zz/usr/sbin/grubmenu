@@ -1,0 +1,281 @@
+#!/bin/bash
+
+usage() {
+	echo "syntax:
+  $0 [w] <directory>
+"
+	exit
+}
+
+[ "$1" = "w" ] && w=1 && shift
+
+if [ ! -d "$1" ] ; then
+	echo "'$1' : not a directory"
+	usage
+	exit
+fi
+
+curdir=$(realpath "$1")
+
+#============================================================
+
+cd "$curdir"
+pvers='32bit 64bit retro32 retro64'
+if [ "$w" ] ; then
+	pvers='
+slacko-140-32
+slacko-140-64
+slacko-141-32
+slacko-141-64
+slacko-142-32
+slacko-142-64
+plinux_strech32
+plinux_strech64
+'
+fi
+
+DIR=PLINUX
+mkdir -p ${DIR}
+
+if [ -f /usr/share/boot-dialog/grldr ] ; then
+	cp -fv /usr/share/boot-dialog/grldr .
+fi
+
+if [ -f /usr/share/boot-dialog/menu_phelp.lst ] ; then
+	cp -fv /usr/share/boot-dialog/menu_phelp.lst ${DIR}
+fi
+
+if [ -f menu.lst ] ; then
+	menu_lst='menu-w.lst'
+else
+	menu_lst='menu.lst'
+fi
+
+if [ -f grub.cfg ] ; then
+	grub_cfg='grub-w.cfg'
+else
+	grub_cfg='grub.cfg'
+fi
+
+cat > ${grub_cfg} <<__END
+insmod part_acorn
+insmod part_amiga
+insmod part_apple
+insmod part_bsd
+insmod part_dfly
+insmod part_dvh
+insmod part_gpt
+insmod part_msdos
+insmod part_plan
+insmod part_sun
+insmod part_sunpc
+
+loadfont /boot/grub/font.pf2
+set gfxmode=800x600
+set gfxpayload=keep
+
+insmod efi_gop
+insmod efi_uga
+
+insmod all_video
+insmod video_bochs
+insmod video_cirrus
+insmod gfxterm
+insmod png
+insmod jpeg
+terminal_output gfxterm
+
+insmod ext2
+insmod f2fs
+insmod ntfs
+insmod exfat
+
+insmod loopback
+insmod iso9660
+insmod udf
+
+set timeout=10
+
+# https://help.ubuntu.com/community/Grub2/Displays
+color_normal=cyan/black
+#menu_color_highlight=black/light-gray
+menu_color_highlight=yellow/red
+menu_color_normal=light-gray/black
+
+#=======================================================
+
+__END
+
+cat > ${menu_lst} <<__END
+#
+# menu.lst ${EDITION} edition
+#
+
+#graphicsmode -1 800 600
+#graphicsmode -1 640 480
+#timeout 10
+#default 0"
+
+__END
+
+#-------------------------------------------------------
+
+for item in ${pvers}
+do
+	mkdir -p ${DIR}/${item}
+
+	#--
+
+	cat >> ${menu_lst} <<__END
+iftitle [if exist /${DIR}/${item}/vmlinuz] PLinux - ${item^^}
+  configfile /${DIR}/menu_plinux_${item}.lst
+
+__END
+
+	#--
+
+	cat > ${DIR}/menu_plinux_${item}.lst <<__END
+#
+# ${DIR}/menu_plinux_${item}.lst
+#
+
+title PLinux - ${item}
+  kernel /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item}
+  initrd /${DIR}/${item}/initrd.gz
+
+title PLinux - ${item} - Don't copy SFS files to RAM\nIf you want more RAM available
+  kernel /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item} pfix=nocopy,fsck
+  initrd /${DIR}/${item}/initrd.gz
+
+title PLinux - ${item} - RAM only - no psave\nBoot up PLinux without psave
+  kernel /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item} pfix=ram,fsck
+  initrd /${DIR}/${item}/initrd.gz
+
+title PLinux - ${item} - No X\nTry 'xorgwizard' after bootup succeed to start graphic mode.
+  kernel /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item} pfix=nox,fsck
+  initrd /${DIR}/${item}/initrd.gz
+
+title PLinux - ${item} - No Kernel Mode Setting\nNo KMS
+  kernel /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item} nomodeset pfix=fsck
+  initrd /${DIR}/${item}/initrd.gz
+
+title PLinux - ${item} - Safe mode, no X\nTry 'xorgwizard' after bootup succeed to start graphic mode.
+  kernel /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item} pfix=ram,nox,fsck
+  initrd /${DIR}/${item}/initrd.gz
+
+title PLinux - ${item} - Ram Disk SHell\nExecute 'init' then dropout to prompt in initramfs
+  kernel /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item} pfix=rdsh
+  initrd /${DIR}/${item}/initrd.gz
+
+iftitle [if exist /PLINUX/menu_plinux_${item}_kernels.lst] -
+  root
+iftitle [if exist /${DIR}/menu_plinux_${item}_kernels.lst] Available kernels
+  configfile /${DIR}/menu_plinux_${item}_kernels.lst
+
+title
+root()
+
+title Back
+  configfile /menu.lst
+__END
+
+	#--
+
+	cat >> ${grub_cfg} <<__END
+menuentry "PLinux - ${item^^}" {
+	configfile /${DIR}/menu_plinux_${item}.cfg
+}
+__END
+
+	cat > ${DIR}/menu_plinux_${item}.cfg <<__END
+
+#
+# ${DIR}/menu_plinux_${item}.cfg
+#
+
+menuentry "PLinux - ${item}" {
+  linux  /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item}
+  initrd /${DIR}/${item}/initrd.gz
+}
+
+menuentry "PLinux - ${item} - Don't copy SFS files to RAM" {
+  linux  /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item} pfix=fsck,nocopy
+  initrd /${DIR}/${item}/initrd.gz
+}
+
+menuentry "PLinux - ${item} - Force xorgwizard (xorgwizard)" {
+  linux  /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item} pfix=xorgwizard
+  initrd /${DIR}/${item}/initrd.gz
+}
+
+menuentry "PLinux - ${item} - No X" {
+  linux  /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item} pfix=nox
+  initrd /${DIR}/${item}/initrd.gz
+}
+
+menuentry "PLinux - ${item} - No linux  Mode Setting" {
+  linux  /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item} nomodeset
+  initrd /${DIR}/${item}/initrd.gz
+}
+
+menuentry "PLinux - ${item} - Safe mode, no X" {
+  linux  /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item} pfix=ram,nox acpi=off apm=off nosmp noapic
+  initrd /${DIR}/${item}/initrd.gz
+}
+
+menuentry "PLinux - ${item} - RAM only - no psave" {
+  linux  /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item} pfix=ram
+  initrd /${DIR}/${item}/initrd.gz
+}
+
+menuentry "PLinux - ${item} - Ram Disk SHell" {
+  linux  /${DIR}/${item}/vmlinuz   psubdir=/${DIR}/${item} pfix=rdsh
+  initrd /${DIR}/${item}/initrd.gz
+}
+
+menuentry "Back" {
+  configfile /grub.cfg
+}
+
+__END
+
+done
+
+#-------------------------------------------------------
+
+	cat >> ${menu_lst} <<__END
+title PLinux Kernel Options
+  configfile /${DIR}/menu_phelp.lst
+
+title
+root ()
+
+title Boot from 1st Hard Disk \nBoot from MBR of first hard disk"
+  rootnoverify (hd0)
+  chainloader +1 || chainloader /grldr || chainloader /bootmngr
+
+title Boot from 1st Hard Disk (USB remap) \nBoot from MBR of first hard disk"
+  map (hd0) (hd1)
+  map (hd1) (hd0)
+  map --hook
+  rootnoverify (hd0)
+  chainloader +1 || chainloader /grldr || chainloader /bootmngr
+  
+
+title Grub4Dos commandline\n(for experts only)
+  commandline
+
+title Reboot computer
+  reboot
+
+title Halt computer
+  halt
+__END
+
+if [ ! -f grldr ] ; then
+	if [ -f /usr/share/boot-dialog/grldr ] ; then
+		cp /usr/share/boot-dialog/grldr .
+	fi
+fi
+
+### END ###

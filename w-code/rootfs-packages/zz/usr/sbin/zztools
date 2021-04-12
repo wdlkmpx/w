@@ -1,0 +1,114 @@
+#!/bin/sh
+
+function biosinfo() {
+	(
+	if which dmidecode &>/dev/null ; then
+		sudo dmidecode --type bios
+		echo ======================================================
+	fi
+	if which biosdecode &>/dev/null ; then
+		sudo biosdecode
+		echo ======================================================
+	fi
+	if which hwinfo &>/dev/null ; then
+		sudo hwinfo --bios
+		echo ======================================================
+	fi
+	) | yad --text-info --title="biosinfo" --center --maximized --window-icon=dialog-info
+}
+
+function cpuinfo() {
+	cpuinfo=$(cat /proc/cpuinfo)
+	echo $(echo "$cpuinfo" | grep 'model name')
+	echo processor: $(echo "$cpuinfo" | grep processor | wc -l)
+	cores=$(echo "$cpuinfo" | grep 'core' | wc -l)
+	[ $cores -gt 0 ] && echo "cores: $cores"
+	echo $(echo "$cpuinfo" | grep 'MHz')
+	echo $(echo "$cpuinfo" | grep 'cache size')
+	bits64="$(cat /proc/cpuinfo | grep flags | grep -E ' lm | lm|lm ')"
+	arch="32 bits"
+	[ "$bits64" ] && arch="64 bits"
+	echo "architecture: $arch"
+}
+
+
+##############################################
+#				evtest gui
+##############################################
+
+function evtest() {
+	if ! which evtest &>/dev/null ; then
+		exec yad --center --title="error" --text="could not find 'evtest' executable" --image=dialog-error --button=gtk-ok:0 --window-icon=dialog-error
+	fi
+
+	tmpdir=$HOME/.config/tmp/inputevents
+	mkdir -p $tmpdir
+
+	events=$(ls /dev/input/event* 2>/dev/null)
+	rm -f $tmpdir/* 2>/dev/null
+	YadEvents=$(
+		for ONEEVENT in $events; do
+			file=${tmpdir}/${ONEEVENT##*/}
+			echo -e "#!/bin/sh \n xterm -title \"test $ONEEVENT\" -e evtest $ONEEVENT" > $file
+			chmod +x $file
+			echo "--field=${ONEEVENT}:BTN $file "
+		done
+	)
+	echo ${YadEvents}
+
+	yad --title="evtest" --width=200 \
+		--center --borders="4" --buttons-layout="center" --separator="\n" \
+		--form --field=":CB" "test with evtest" ${YadEvents} \
+		--button="Close:10"
+
+	rm -rf $tmpdir
+	exit	
+}
+
+##############################################
+#				logindate
+##############################################
+
+function logindate() {
+	lddir=/var/log/login_date
+
+	if [ "$1" = "set" ] ; then
+		mkdir -p ${lddir}
+		[ -f "${lddir}/current" ] && cp -fv ${lddir}/current ${lddir}/last
+		[ -f "${lddir}/current2" ] && cp -fv ${lddir}/current2 ${lddir}/last2
+		echo $(date "+%Y-%m-%d %H:%M:%S") > ${lddir}/current
+		echo $(date "+%s") > ${lddir}/current2
+		exit
+	fi
+	
+	local current current2 last last2
+	if [ -f "${lddir}/current" ] ; then
+		read -r current2 < ${lddir}/current2
+		read -r current < ${lddir}/current
+		msgx="  Current login date: ${current}  "
+	fi
+	if [ -f "${lddir}/last" ] ; then
+		read -r last2 < ${lddir}/last2
+		read -r last < ${lddir}/last
+		msgx="$msgx \n  Last login date     : ${last}  "
+	fi
+	if [ "$current2" -a "$last2" ] ; then
+		local T=$((current2 - last2))
+		#printf "Pretty format: %02d:%02d:%02d:%02d\n" "$((T/86400))" "$((T/3600%24))" "$((T/60%60))" "$((T%60))"
+		#local weeks=
+		local days=$((T/86400))
+		local hours=$((T/3600%24))
+		local minutes=$((T/60%60))
+		local seconds=$((T%60))'s'
+		if [ $days -ge 1 ]; then days=${days}'d ' ; else days='' ; fi
+		if [ $hours -ge 1 ]; then hours=${hours}'h ' ; else hours='' ; fi
+		if [ $minutes -ge 1 ]; then minutes=${minutes}'m ' ; else minutes='' ; fi
+		diff=${days}${hours}${minutes}${seconds} #return value
+		msgx="$msgx \n\n  Difference             : $diff  "
+	fi
+	
+	exec yad --title='logindate' --text="$msgx"	--center \
+	--image=dialog-info --window-icon=dialog-info --button=gtk-ok:0
+}
+
+$@

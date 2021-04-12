@@ -1,0 +1,101 @@
+#!/bin/sh
+#w__ 2015
+
+if [ ! "$1" ] || [ ! -d "$@" ] ; then
+	echo "ERROR: Input is not a directory" && exit 1
+fi
+
+inputdir="$@"
+if [ -d "$inputdir" ]; then
+	inputdir=$(realpath "$inputdir")
+fi
+
+echo $inputdir
+location=${inputdir%/*} #dirname
+file=${inputdir}
+cd "$location"
+
+ 
+if [ "$DISPLAY" ]; then #yad - gtk 
+	res=$(yad --title="diraction " --no-buttons \
+	--width=420 --height=460 --center \
+	--separator="\n" --list --radio-list \
+	--column="action" --column="description" \
+	"*tar.gz" "Archive dir" \
+	"dir2pet" "Create PET file from dir" \
+	"dir2iso" "Create ISO file from dir" \
+	"burniso" "burn directory directly to CD/DVD/BD" \
+	"dir2html" "Create HTML list (net)" \
+	"@searchtext" "search text in dir" \
+	"filename list" "will append 'XXX - ' to every file" \
+	"filename listr" "will remove 'XXX - ' from every file" \
+	"mplayer" "play in an mplayer GUI" \
+	"deadbeef" "enqueue in deadbeef" \
+	"@checkdeps" "check dependencies in libs-apps" \
+	"@checkdeps -system" "check dependencies in libs-apps" \
+	"@stripdir" "strip binaries in dir" \
+	"@stripdir --rootfs" "strip binaries in dir, --rootfs mode" \
+	"@tardir -comp" "compress all files in dir using TAR" \
+	"@tardir -decomp" "decompress all files in dir using TAR" \
+	"@tardir -merge" "merge ALL dir contents in _merge dir" \
+	"@tardir -split" "split & merge ALL dir contents in _dev and _main dirs" \
+	"@install2root-r" "install2root -r (install ALL pkgs in dir)" \
+	"@install2root-e-r" "install2root -e -r (extract recursively)" \
+	)
+	[ ! "$res" ] && echo "User cancelled operation" && exit 1
+	read -r action <<< "$res"
+	XTERM="xterm +hold -e"
+
+else #console
+	echo -n "
+	ACTION		DESCRIPTION
+	------		-----------
+	dir2pet 	Create PET file from dir
+	*tar.gz 	Archive dir
+	dir2html 	Create HTML list (net)
+	dir2html -v2 	(unix) Fast create html list
+	dir2html -txt 		(unix) Fast create txt list
+	filename list 		will append 'XXX - ' to every file
+	filename listr		will remove 'XXX - ' from every file
+	
+Type ACTION: "
+	read action
+	XTERM='xterm -e'
+fi
+
+#----
+echo "diraction: path is $file"
+filename=${file##*/}
+  
+case $action in
+	dir2pet)	 exec dir2pet -g -s "$filename" ;;
+	*tar.gz) 	 exec $XTERM tar -vzcf "${filename}.tar.gz" "$filename" ;;
+	*tar.xz) 	 exec $XTERM tar -vJcf "${filename}.tar.xz" "$filename" ;;	
+	dir2iso)	 exec dir2iso "$inputdir" ;;
+	dir2html)	exec dir2html "$inputdir" ;;
+	@searchtext) exec searchtext "$inputdir" ;;
+	filename?list) exec filename list "$inputdir" ;;
+	filename?listr) exec filename listr "$inputdir" ;;
+	burniso)	exec burniso "$inputdir" ;;
+	deadbeef*)	deadbeef --queue "$inputdir" ;;
+	mplayer)
+		if type gnome-mplayer 1>/dev/null 2>&1 ; then
+			exec gnome-mplayer "$inputdir"
+		else
+			exec gtk-mplayer "$inputdir"
+		fi
+		;;
+	@checkdeps)  exec checkdeps "$inputdir" ;;
+	@checkdeps?-system)  xterm -hold -e checkdeps -system "$inputdir" ;;
+	@stripdir)	 exec stripdir "$inputdir" ;;
+	@stripdir2)	 exec stripdir --rootfs "$inputdir" ;;
+	@tardir?-comp)		exec $XTERM tardir -comp "$inputdir"     ;;	
+	@tardir?-decomp)		exec $XTERM tardir -decomp "$inputdir"   ;;
+	@tardir?-split)		exec $XTERM tardir -split "$inputdir"    ;;
+	@tardir?-merge)		exec $XTERM tardir -merge "$inputdir"    ;;
+	@install2root-r)		xterm -e install2root -r "$inputdir"  ;;
+	@install2root-e-r)		xterm -e install2root -e -r "$inputdir"  ;;
+	*) echo 'diraction error: unrecognized action' ; exit 1 ;;
+esac
+  
+### END ###

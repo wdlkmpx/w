@@ -1,0 +1,245 @@
+#!/bin/bash
+#w__ 2015
+#gui for mediaconvert (cli app)
+
+#set -x
+
+CONFIGDIR=${HOME}/.config/mediaconvert
+CONFIGFILE=${CONFIGDIR}/config 
+[ ! -d "$CONFIGDIR" ] && mkdir -p $CONFIGDIR
+
+#* OPTIONS FROM CONFIG FILE
+#  $ALLFILESINDIR $OUTSAMEDIR $OUTPUTDIR $PRESET
+if [ -f "$CONFIGFILE" ] ; then
+	. $CONFIGFILE
+else
+	echo > $CONFIGFILE
+fi
+export PRESET
+export PRESETFILE=${CONFIGDIR}/presets
+[ ! -f $PRESETFILE ] && echo > $PRESETFILE
+
+CHECK_SAME='false'
+CHECK_ALL='false'
+[ "$OUTSAMEDIR" = "1" ] && CHECK_SAME='true'
+[ "$ALLFILESINDIR" = "1" ] && CHECK_ALL='true'
+OUTDIR=$HOME
+[ -d "$OUTPUTDIR" ] && OUTDIR=$OUTPUTDIR
+START='00:00:00'
+DURATION='00:00:00'
+if [ "$1" ] ; then
+	export inputfile="$(realpath "$@")" #file was specified in the args
+fi
+
+CONVB="CONVERT"
+# Determine input type
+if [ -d "$inputfile" ] ; then
+	TYPE='Dir'
+	DIRMODE=1
+elif [ -f "$inputfile" ] ; then
+	TYPE='File'
+elif [ "$inputfile" = "" ] ; then
+	CONVB="OK"
+elif [ ! -e "$inputfile" ] ; then
+	yad --title="Error" --text="File does not exist:\n\n$inputfile" --image="dialog-error" --button="OK":0 --center --on-top --fixed --sticky --borders="4"
+	exit 1
+fi
+
+
+while read i
+do
+	ITEMS="$ITEMS
+<item>${i}</item>"
+done <<< $(cat $PRESETFILE | sed -e "/^#.*/d" -e '/^$/d' -e 's/"//g' -e 's/<//g' -e 's/>//g' -e 's/=.*//')
+
+#set -x
+if [ "$PRESET" ] ; then
+	DEFAULT_PRESET="<default>$PRESET</default>"
+	grep "${PRESET}=" $PRESETFILE > /tmp/mc_preset
+	DEF="$(echo "$ITEMS" | grep ">${PRESET}<")"
+	if [ "$DEF" ] ; then
+		ITEMS="${DEF}
+$(echo "$ITEMS" | grep -v "${PRESET}=")"
+	fi
+else
+	echo > /tmp/mc_preset
+fi
+
+COMBO_PRESET='<comboboxtext space-expand="true" space-fill="true">
+			<variable>preset</variable>
+			'"${ITEMS}"'
+			<action>grep ${preset%%=*} $PRESETFILE > /tmp/mc_preset</action>
+			<action>refresh:view_preset</action>
+		</comboboxtext>
+'
+
+if [ "$inputfile" ] ; then
+	IF='<hbox>
+			<text editable="false" xalign="0" space-expand="false"><label>'$(gettext "${TYPE}")'</label></text>
+			<entry editable="false" space-expand="true">
+				<variable>infile</variable>
+				<sensitive>false</sensitive>
+				<default>'${inputfile}'</default>
+			</entry>
+		</hbox>'
+fi
+
+export MSCW_DIALOG='
+<window title="mediaconvert-gui" image-name="/usr/share/pixmaps/puppy/card_pci.svg" resizable="false">
+	<vbox>
+	<frame>
+		'${IF}'
+		<hbox>
+			<text xalign="0" space-expand="false"><label>'$(gettext 'Out dir:')'</label></text>
+			<entry editable="false" accept="directory">
+				<variable>OUTDIR</variable>
+				<default>'${OUTDIR}'</default>
+				<sensitive>false</sensitive>
+			</entry>
+			<button>
+				<input file stock="gtk-open"></input>
+				<action type="fileselect">OUTDIR</action>
+				<action>refresh:OUTDIR</action>
+			</button>
+		</hbox>
+		<hbox>
+			<text xalign="0" space-expand="false"><label>'$(gettext 'Start:')'</label></text>
+			<entry space-expand="true">
+				<variable>START</variable>
+				<default>"'${START}'"</default>
+			</entry>
+		</hbox>
+		<hbox>
+			<text xalign="0" space-expand="false"><label>'$(gettext 'Duration:')'</label></text>
+			<entry space-expand="true">
+				<variable>DURATION</variable>
+				<default>"'${DURATION}'"</default>
+			</entry>
+		</hbox>
+
+		<hseparator></hseparator>
+
+		<hbox>
+			<text xalign="0" space-expand="false"><label>'$(gettext 'Preset:')'</label></text>
+			'${COMBO_PRESET}'
+		</hbox>
+		<hbox>
+			<entry editable="false" space-expand="true">
+				<variable>view_preset</variable>
+				<input>cat /tmp/mc_preset</input>
+				<sensitive>false</sensitive>
+			</entry>
+		</hbox>
+
+		<hseparator></hseparator>
+
+		<checkbox>
+			<label>Use input directory as the output directory (override out dir)</label>
+			<default>'${CHECK_SAME}'</default>
+			<variable>CHECK_SAME</variable>
+		</checkbox>
+		<checkbox>
+			<label>Process all files in the input file directory</label>
+			<default>'${CHECK_ALL}'</default>
+			<variable>CHECK_ALL</variable>
+		</checkbox>
+		<checkbox>
+			<label>Override extension (choose a different extension/format)</label>
+			<default>false</default>
+			<variable>CHECK_OVERRIDEEXTENSION</variable>
+		</checkbox>
+		<checkbox>
+			<label>Debug</label>
+			<default>false</default>
+			<variable>CHECK_DEBUG</variable>
+		</checkbox>
+	</frame>
+
+	<hbox>
+		<button space-expand="true" space-fill="true">
+			'$(/usr/lib/gtkdialog/xml_button-icon apply.svg)'
+			<label>'${CONVB}'</label>
+			<action>exit:OK</action>
+		</button>
+		<button space-expand="true" space-fill="true">
+			<label>PMEDIAINFO</label>
+			<action>pmediainfo "$inputfile" &</action>
+		</button>
+		<button space-expand="true" space-fill="true">
+			<label>Edit presets...</label>
+			<action>geany $PRESETFILE &</action>
+		</button>
+		<button space-expand="true" space-fill="true">
+			'$(/usr/lib/gtkdialog/xml_button-icon quit.svg)'
+			<label>Quit</label>
+			<action type="exit">Cancel</action>
+		</button>
+	</hbox>
+
+	</vbox>
+</window>'
+
+###
+. /usr/lib/gtkdialog/xml_info gtk #build bg_pixmap for gtk-theme
+echo "$MSCW_DIALOG" > /tmp/mscw.gui.xml #debug
+res=$(gtkdialog --center --program MSCW_DIALOG)
+res="$(echo "$res" | grep '="')"
+#echo "$res"
+eval "$res"
+
+if [ "$EXIT" != "OK" ] ; then
+	exit
+fi
+
+###########################################
+#         write to $CONFIGFILE
+###########################################
+(
+	if [ "$CHECK_ALL" = "true" ] ; then
+		echo "ALLFILESINDIR=1"
+	else
+		echo "ALLFILESINDIR=0"
+	fi
+
+	if [ "$CHECK_SAME" = "true"  ] ; then
+		echo "OUTSAMEDIR=1"
+	else
+		echo "OUTSAMEDIR=0"
+	fi
+
+	echo "OUTPUTDIR=\"$outputdir\""
+	echo "PRESET=\"${preset%%=*}\""
+
+	[ ! "$START" ] && START='00:00:00'
+	[ ! "$DURATION" ] && DURATION='00:00:00'
+	[ "$START" = '0' ] && START='00:00:00'
+	[ "$DURATION" = '0' ] && DURATION='00:00:00'
+
+	echo "START=$START"
+	echo "DURATION=$DURATION"
+) > $CONFIGFILE
+
+rm -f /tmp/mc_preset
+if [ ! "$inputfile" ] ; then
+	exit
+fi
+
+###########################################
+
+if [ "$CHECK_DEBUG" = "true" ] ; then
+	export DEBUG=1
+fi
+
+if [ "$CHECK_OVERRIDEEXTENSION" = "true" ] ; then
+	newext=$(yad --center --title="Override extension" --text="Enter the new extension for the output file:" \
+		--entry --entry-text="${inputfile##*.}")
+	[ ! "$newext" ] && echo "User cancelled operation" && exit 1
+	export OVERRIDEEXTENSION=$newext
+	echo "Override extension: $newext"
+fi
+
+#with xterm for maximun speed
+exec xterm -bg black -fg white -title "Media Convert" \
+	-geometry 640x480 -e mediaconvert ${preset%%=*} "$infile"
+	
+### END ###

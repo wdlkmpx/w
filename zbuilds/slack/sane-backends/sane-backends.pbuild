@@ -1,0 +1,55 @@
+# sane-backends
+
+. ../func
+. ../build.conf
+
+#https://alioth.debian.org/frs/download.php/file/4146/sane-backends-1.0.25.tar.gz
+#URL=http://distro.ibiblio.org/puppylinux/sources/s
+URL=https://alioth.debian.org/frs/download.php/file/4146/
+PKG=sane-backends
+VER=1.0.25
+COMP=tar.gz
+DESC="sane scanner utility backends and drivers"
+DEPS=
+CAT=BuildingBlock
+DESKTOP=sane-backends.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+patch_me() {
+	for e in *.patch ;do
+		echo "Applying $e"
+		( cd ${PKG}-${VER}; patch -p1 < ${CWD}/${e} )
+	done
+}
+
+build() {
+	cd ${PKG}-${VER}
+	./configure \
+		--prefix=/usr \
+		--libdir=/usr/${LIBDIR} \
+		--sysconfdir=/etc \
+		--localstatedir=/var/lib \
+		--enable-libusb_1_0
+	make $MKFLG || exit 1
+	make DESTDIR=${CWD}/${PKG}-install install
+	cd -
+}
+
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+patch_me
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

@@ -1,0 +1,46 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+# ====================================================
+
+URL=http://ftp.gnu.org/gnu/sed
+SRC=sed
+PKG=sed_static
+VER=4.8 #2020-01-14
+COMP=tar.xz
+DESC=""
+DEPS=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='bin/sed'
+
+build() {
+	cd ${SRC}-${VER}
+
+	EXE='sed/sed'
+	opts="--prefix=/usr --bindir=/bin --disable-nls --disable-i18n --without-selinux"
+	_configure
+	_make ${MKFLG} LDFLAGS=-static
+
+	abort_if_file_not_found ${EXE}
+	_strip ${EXE}
+
+	standard_make_install
+}
+
+# main
+retrieve ${SRC}-${VER}.${COMP}
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup
+

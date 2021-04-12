@@ -1,0 +1,53 @@
+# notecase
+
+. ../func
+. ../build.conf
+
+URL=http://downloads.sourceforge.net/project/notecase/notecase/1.9.8
+PKG=notecase
+SRCPKG=1.9.8_src
+VER=1.9.8
+COMP=tar.gz
+DESC="excellent note takiing software"
+DEPS=+gtk+2
+CAT=Document
+DESKTOP=notecase.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+patch_me() {
+	x=0
+	for patch in ../*patch ; do
+		echo "Applying $patch"
+		patch -p${x} < $patch
+		x=$(($x + 1))
+	done
+}
+
+build() {
+	cd ${PKG}-${VER}
+	patch_me
+	#mv{PKG}-${SRCPKG} {PKG}-${VER} 
+	make
+	[ "$?" -eq 0 ] || exit
+	make DESTDIR=$CWD/${PKG}-install install
+	cd -
+}
+	
+# main
+retrieve ${PKG}-${SRCPKG}.${COMP}
+extract ${PKG}-${SRCPKG}.${COMP}
+#patch_me
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

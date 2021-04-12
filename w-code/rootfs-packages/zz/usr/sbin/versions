@@ -1,0 +1,111 @@
+#!/bin/sh
+
+#strings is in binutils, I have added to the puppy5syscore
+
+if [ "$DISPLAY" ] ; then
+	command='yad --text-info --title="Versions" \
+	--width="640" --height="480" --buttons-layout="center" \
+	--center --borders="4"'
+else
+	command='(while read line; do echo "$line" ; done | more)'
+fi
+
+(
+
+uname -a
+echo -e "---------------------------------------------------"
+cat /initrd/DISTRO_SPECS | sed -e '/^#/d' -e '/SFS/d' -e '/IDS/d' -e '/PREFIX/d' -e '/DB/d'
+echo -e "---------------------------------------------------"
+version=$(ldd --version | head -1)
+version=${version##* }
+echo "glibc version : $version"
+echo -e "---------------------------------------------------"
+#[ "$(which readelf)" ] && readelf -d /usr/lib/libstdc++.so.6 | grep soname
+echo "/usr/lib/libstdc++.so.6 -> $(readlink /usr/lib/libstdc++.so.6)"
+[ "$(which strings)" ] && strings /usr/lib/libstdc++.so.6 | grep LIBCXX | tail -3
+echo -e "---------------------------------------------------"
+strings $(which syslinux) | grep SYSLINUX 
+echo -e "---------------------------------------------------"
+
+
+if [ "$(which gcc)" ]; then
+	echo "gcc version: $(gcc -dumpversion)"
+	echo "g++ version: $(g++ -dumpversion)"
+	echo -e "---------------------------------------------------"
+fi
+
+busybox | head -2
+echo -e "---------------------------------------------------"
+echo 'badblocks'
+echo 'debugfs'
+echo 'e2image'
+e2fsck -V 2>&1
+echo ...
+echo -e "---------------------------------------------------"
+bash --version | head -2
+echo -e "---------------------------------------------------"
+
+if [ "$DISPLAY" ] ; then
+	jwm -v | head -2
+	echo -e "---------------------------------------------------"
+	rox --version | head -2
+	echo -e "---------------------------------------------------"
+	echo "yad: $(yad --version)"
+	echo -e "---------------------------------------------------"
+	xorgver=$(Xorg -version 2>&1 | head -7 | sed '1d')
+	echo "$xorgver"
+	echo -e "---------------------------------------------------"
+
+	geany --version
+	echo -e "---------------------------------------------------"
+
+	if [ "$(which mtpaint)" ]; then
+		mtpaint --version | head -1
+		echo -e "---------------------------------------------------"
+	fi
+fi
+
+if [ "$(which mplayer)" ]; then
+	mplayer | head -1
+	echo -e "---------------------------------------------------"
+fi
+
+if [ "$DISPLAY" ] ; then
+	if [ "$(which deadbeef)" ]; then
+		deadbeef --version 2>&1
+		echo -e "---------------------------------------------------"
+	fi
+	if [ "$(which transmission-gtk)" ]; then
+		transmission-gtk --version 2>&1
+	fi
+	if [ "$(which uget)" ]; then
+		uget --version 2>&1
+		xchat --version
+		echo -e "---------------------------------------------------"
+	fi
+fi
+
+awk --version | head -1
+grep --version | head -1
+sed --version | head -1
+cp --version | head -1
+tar --version | head -1
+echo -e "---------------------------------------------------"
+
+7z | head -2 | sed '1d'
+echo "zip: $(zip -v | head -2 | sed '1d')"
+xz --version
+gzip --version | head -1
+cabextract --version
+dpkg-deb --version | head -1
+
+echo -e "---------------------------------------------------"
+
+echo "nc [netcat]: $(nc -h 2>&1 | head -1)"
+tree --version
+dict --version | head -1
+echo -e "---------------------------------------------------"
+
+) | eval "$command"
+
+

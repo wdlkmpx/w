@@ -1,0 +1,65 @@
+#!/bin/bash
+
+imgFile="$1"
+MOUNTPOINT="$2"
+n_image=0
+n_count=0
+
+if [ -z "$1" -o -z "$2" ] ; then
+	echo "syntax: $0 img.wim mountdir"
+	exit 1
+fi
+
+if ! [ -f "$1" ] ; then
+	echo "file not found: $1"
+	exit 1
+fi
+
+wim_desc=
+while read field desc
+do
+	case $field in "Index:")
+		n_count=$(($n_count + 1))
+		read file desc
+		if [ $n_count -eq 1 ] ; then
+			wim_desc="$desc"
+		else
+			wim_desc="$wim_desc
+$desc"
+		fi ;;
+	esac
+done <<< "$(LANG=C wiminfo "$imgFile")"
+
+if [ $n_count -eq 1 ] ; then
+	n_image=1
+else
+	if [ "$DISPLAY" ] ; then
+		DIALOG=Xdialog
+		MENU="--menubox"
+	else
+		DIALOG=dialog
+		MENU="--menu"
+	fi
+	x=1
+	tmpfile=/tmp/mount.wim$$
+	echo "$DIALOG --stdout $MENU 'Select image' 15 60 15 \\" > ${tmpfile}
+	while read d
+	do
+		echo -n " $x \"${d}\"" >> ${tmpfile}
+		x=$((x+1))
+	done <<< "$wim_desc"
+	n_image=$(sh ${tmpfile})
+	rm -f ${tmpfile}
+	if ! [ "$n_image" ] ; then
+		exit 1
+	fi
+fi
+
+if [ ! -d "$MOUNTPOINT" ] ; then
+	mkdir -p "$MOUNTPOINT"
+fi
+
+wimmountrw "$imgFile" ${n_image} "$MOUNTPOINT" \
+|| wimmount "$imgFile" ${n_image} "$MOUNTPOINT"
+
+exit $?

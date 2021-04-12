@@ -1,0 +1,358 @@
+#!/bin/sh
+#Install2root - w__ 2015
+
+# Variables that can be set by calling application
+# ------------------------------------------------
+# $TEMPDIR - (not implemented yet) temporary directory to store pkgs' files before copying them to /
+# $FORCELOCATION - custom installation directory
+# $WOOFPKGRECORD - file to record installed packages
+
+ALL=0
+for arg in $@ ; do
+	case $arg in
+		-all|-dir|-d) ALL=1; shift;; #for files only
+		-extracthere|-e) EXTRACTHERE=1; IGNORE_POSTINSTALL=1 ; shift;;
+		-recursive|-r) RECURSIVE=1 ; shift;;
+		-system|-s) SYSTEM=1; shift;;
+	esac
+done
+
+if [ -d "$1" ] ; then
+	ISDIR=1
+else
+	case "$1" in
+		*.pet|*.deb|*.sfs) ok=1 ;;
+		*.tar.[gx]z|*.t[gx]z) ok=1 ;;
+		*) echo "${1##*/}: File extension not allowed"
+	esac
+fi
+
+##################################################
+#					VARIABLES
+##################################################
+
+#$WOOFPKGRECORD - this can be set by the calling script - a custom file
+if [ ! "$WOOFPKGRECORD" ] ; then
+	if [ "$SYSTEM" ] ; then
+		WOOFPKGRECORD='/root/.packages/woof-installed-packages'
+	else
+		WOOFPKGRECORD='/root/.packages/user-installed-packages'
+	fi
+fi
+
+fileX="$1"
+
+HASMIME=
+HASDESKTOP=
+HASICONS=
+HASFONTS=
+HASMANUAL=
+
+function FixMultiArch() {
+	local dir2fix="$@"
+	. /etc/DISTRO_SPECS #$DISTRO_ARCHDIR
+	if [ "$DISTRO_ARCHDIR" ] ; then
+		for BASEDIR in bin lib usr/bin usr/lib usr/include ; do
+			if [ -e ${dir2fix}/${BASEDIR}/${DISTRO_ARCHDIR} ] ; then
+				cp -a --remove-destination ${dir2fix}/${BASEDIR}/${DISTRO_ARCHDIR}/* ${dir2fix}/${BASEDIR}/ 2>/dev/null
+				rm -rf ${dir2fix}/${BASEDIR}/${DISTRO_ARCHDIR}
+			fi
+		done
+	fi
+}
+
+###############################################################
+
+CURDIR=${PWD}
+
+[[ ${fileX} != /* ]] && fileX=${PWD}/${fileX} #FIX RELATIVE PATH
+[[ ${fileX} == */ ]] && fileX=${fileX%\/}     #$file must not contain a final slash '/'
+
+#$FORCELOCATION variable is set by the calling script - a custom directory
+if [ "$FORCELOCATION" ] ; then
+	InstallDir=${FORCELOCATION}
+else
+	if [ "$EXTRACTHERE" ] ; then
+		wdir=${fileX%/*}
+		InstallDir="${wdir}/decomp"
+		mkdir -p $InstallDir
+	else
+		InstallDir="/"
+	fi	
+fi
+
+###################################################################
+
+[ ! "$RECURSIVE" ] && DIRDEPTH='-maxdepth 1'
+
+if [ "$ISDIR" ] ; then 	#input directory
+	TARDIR=${fileX}
+	TARFILES="$( find ${TARDIR} $DIRDEPTH -follow -type f | \
+	grep -E '\.deb$|\.pet$|tar\.gz$|tar\.xz$' | sort -u )"
+else #file(s)
+	[ ! -f "$fileX" ] && echo "ERROR: Invalid file" && exit
+	if [ $ALL -eq 0 ]; then 
+		#process all files specified in command line
+		TARFILES="$( while [ "$1" ] ; do echo $1 ; shift ; done )"
+		[[ ${fileX} != /* ]] && fileX=${PWD}/${fileX}
+		#echo $fileX
+	else #file - but will process whole directory
+		TARDIR=${fileX%/*}
+		TARFILES="$( find ${TARDIR} $DIRDEPTH -follow -type f | \
+		grep -E '\.deb$|\.pet$|tar\.gz$|tar\.xz$' | sort -u )"
+	fi
+fi
+
+[ "`whoami`" != "root" ] && exec sudo -A ${0} ${@}
+
+##################################################
+#				FILES(S) PROCESSING
+##################################################
+
+cd $InstallDir
+if [ "$ISDIR" ] ; then
+	echo "** Input dir: ${fileX}"
+else
+	echo "** Input dir: ${fileX%/*}"
+fi
+echo "** Working dir: ${PWD}
+** Install dir: $InstallDir"
+
+if [ "$KEEP_PINSTALL_FINAL" ] ; then #can be set by the calling script
+	if [ ! -f ${FORCELOCATION}/pinstall.final ] ; then
+		echo "#!/bin/sh" > ${FORCELOCATION}/pinstall.final
+		chmod +x ${FORCELOCATION}/pinstall.final	
+	fi
+else
+	echo "#!/bin/sh" > ${FORCELOCATION}/pinstall.final
+	chmod +x ${FORCELOCATION}/pinstall.final
+fi
+
+if [ "$SYSTEM" ] ; then
+	dirss=${FORCELOCATION}/root/.packages/builtin_files
+	filezzz="${FORCELOCATION}/root/.packages/builtin_files/${pkgname}"
+else
+	dirss=${FORCELOCATION}/root/.packages
+	filezzz="${FORCELOCATION}/root/.packages/${rootname}.files"
+fi
+
+#echo "$TARFILES" ; exit ##DEBUG##
+
+while read file; do
+
+	#echo "$file" #debug
+	
+	[[ ${file} != /* ]] && file=${CURDIR}/${file}
+	
+	deb=0
+	sfs=0
+	case "$file" in
+		*.pet)
+			finfo=$(file -b $file)
+			case $finfo in
+			  gz*|GZ*) opt=-z ;;
+			  xz*|XZ*) opt=-J ;;
+			esac
+			ok=1 ; tarlist="${opt} -tf" ; tardecomp="${opt} -xf" ; pet='2>/dev/null'
+			;;
+		*.tar.gz) ok=1 ; tarlist="-ztf" ; tardecomp="-z -x -f" ;;
+		*.tar.xz) ok=1 ; tarlist="-Jtf" ; tardecomp="-J -x -f" ;;
+		*.deb)	  ok=1 ; deb=1 ;;
+		*.sfs)	  ok=1 ; sfs=1 ;;
+		*) continue ;;
+	esac
+	
+	#############################################
+	if [ $deb -eq 1 ] ; then
+		tarfile=${file##*/} #"$(basename "$file")"
+		rootname="${tarfile%.deb}"
+		pkgname="${rootname%%_*}"
+		rname2=${rootname#*_} 
+		pkgversion=${rname2%%-*}
+		dir="${file%.deb}"
+		targetdir="$dir"
+		mkdir -p "$targetdir"
+		dpkg-deb -x "$file" "$targetdir"  #-X (verbose)
+		FixMultiArch $dir
+		if [ "$EXTRACTHERE" ] ; then
+			echo "- Processing: $tarfile"
+			cp -rf $targetdir/* $InstallDir
+			rm -rf $targetdir
+			continue
+		fi
+		#echo $dir
+		filelist="$(find "$dir" | sed "s|^${dir}||")"
+		filezzz="$dirss/${rootname}.files"
+		[ "$SYSTEM" ] && filezzz="$dirss/${pkgname}"		
+		if [ -d "$dirss" ] ; then
+			echo "$filelist" | sort > $filezzz
+		fi
+		cp -rf $targetdir/* $InstallDir
+		rm -rf $targetdir
+	
+	elif [ $sfs -eq 1 ] ; then
+		filelist="$(unsquashfs -l "${file}" | sed 's|^squashfs-root||' | grep '^/')"
+		tarfile=${file##*/} #"$(basename "$file")"
+		rootname=${tarfile%.sfs}
+		pkgname=${rootname%%\-[0-9]*} #first match onwards: -X* where X is a number
+		if [ "$pkgname" = "$rootname" ] ; then
+			pkgname="${rootname%%\-*}" #the old way, easy way
+		fi
+		pkgversion="${rootname#${pkgname}\-}"
+		pkgversion="${pkgversion//-*}"
+		[ "$EXTRACTHERE" ] && echo "- Processing: $tarfile"
+		unsquashfs -n -f -d "$InstallDir" "$file" 1>/dev/null
+		[ "$EXTRACTHERE" ] && continue
+		filezzz="$dirss/${rootname}.files"
+		[ "$SYSTEM" ] && filezzz="$dirss/${pkgname}"		
+		if [ -d "$dirss" ] ; then
+			echo "$filelist" | sort > $filezzz
+		fi
+		
+	else
+		filelist="$(tar $tarlist "$file" 2>/dev/null)" #; echo "$filelist"
+	
+		tarfile=${file##*/} #"$(basename "$file")"
+		rootname=${tarfile%.tar.*}
+		rootname=${rootname%.pet}
+	
+		pkgname=${rootname%%\-[0-9]*} #first match onwards: -X* where X is a number
+		if [ "$pkgname" = "$rootname" ] ; then
+			pkgname="${rootname%%\-*}" #the old way, easy way
+		fi
+		pkgversion="${rootname#${pkgname}\-}"
+		pkgversion="${pkgversion//-*}"
+	
+		#fix filelist
+		filezzz="$dirss/${rootname}.files"
+		[ "$SYSTEM" ] && filezzz="$dirss/${pkgname}"
+		if [ -d "$dirss" ] ; then
+		  echo "$filelist" | \
+			sed -e "s%^${rootname}%%" \
+			-e '\%^\./%d' \
+			-e '\%^/$%d' \
+			-e 's%^\.%%' \
+			-e 's%^%/%' \
+			-e 's%//%/%' \
+			-e '/\/pet.specs/d' \
+			-e '/\/pinstall.sh/d' \
+			-e '/\/puninstall.sh/d' \
+			-e '/.*\/$/d' | \
+			sort > ${filezzz}
+		fi
+
+	fi
+	########################################################
+	
+	while read FILEx; do	
+		case $FILEx in
+			*/usr/share/mime/packages/?*) 		 HASMIME=1    ;;
+			*/usr/share/applications/?*.desktop) HASDESKTOP=1 ;;
+			*/usr/share/icons/hicolor/?*) 		 HASICONS=1   ;;
+			*/usr/share/fonts/default/?*) 		 HASFONTS=1   ;;
+			*/usr/share/man/?*)					 HASMANUAL=1  ;;
+		esac
+	done <<< "$filelist"
+
+	##TESTS
+	#[ "$HASMIME" ]    && echo "* There are MIME package(s). Will update MIME database"
+	#[ "$HASDESKTOP" ] && echo "* There are DEKSTOP file(s). Will fixmenus"
+	#[ "$HASICONS" ]   && echo "* There are HICOLOR icon(s). Will update icon cache"
+	#[ "$HASFONTS" ]   && echo "* There are FONT(s). Will update fontconfig cache"
+	#exit #tests
+	##continue
+
+	###################################################
+	echo "- Processing: $tarfile"
+	if [ $deb -eq 1 ] ; then
+		specs="${rootname}|${pkgname}|${pkgversion}||BuildingBlock|K||${tarfile}||||||"
+	elif [ $sfs -eq 1 ] ; then
+		specs="${rootname}|${pkgname}|${pkgversion}||BuildingBlock|K||${tarfile}||||||"
+	else #pet tar
+		strip='--strip=1'
+		[ "$(echo "$filelist" | grep -m 1 -E "^\.")" ] && strip='--strip=2'
+		#echo $strip
+		eval tar --directory="${InstallDir}" ${strip} ${tardecomp} ${file} $pet
+		[ "$EXTRACTHERE" ] && continue
+		if [ -f ${FORCELOCATION}/pet.specs ] ; then
+			read -r specs < ${FORCELOCATION}/pet.specs
+		else
+			specs="${rootname}|${pkgname}|${pkgversion}||BuildingBlock|K||${tarfile}||||||"
+		fi
+	fi
+	###################################################
+	
+	#align-1.7.1|align|1.7.1||BuildingBlock|40K||align-1.7.1.pet|+perl_tiny|align text into columns||||		
+	sed -i -e "\%${rootname}|%d" ${WOOFPKGRECORD} ##e.g /root/.packages/woof-installed-packages	
+	echo "$specs" >> ${WOOFPKGRECORD}
+
+	if [ ! "$IGNORE_SCRIPTS" ] ; then #can be set by the calling script
+		if [ -f pinstall.sh ]; then
+			echo "		...found install script"
+			PINSTALL="1"
+			#./pinstall.sh
+			echo -e "\n\n#==========================================================
+#			${file##*/}
+#==========================================================" >> ${FORCELOCATION}/pinstall.final
+			sed -e '/^#\!\/bin/d' ${FORCELOCATION}/pinstall.sh >> ${FORCELOCATION}/pinstall.final
+		fi
+		[ ! "$SYSTEM" ] && [ -f puninstall.sh ] && mv -f ${FORCELOCATION}/puninstall.sh ${FORCELOCATION}/root/.packages/${rootname}.remove
+	fi
+	
+	rm -f pet.specs pinstall.sh puninstall.sh 
+
+done <<< "$TARFILES"
+
+#exit #tests
+
+
+###################################################
+#			POST-INSTALL ACTIONS
+#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+if [ ! "$IGNORE_POSTINSTALL" ] ; then #can be set anytime
+
+	if [ "$PINSTALL" ] ; then
+		echo -e "\n========= NOW RUNNING INSTALL SCRIPT(s) ============\n"
+		${FORCELOCATION}/pinstall.final
+	fi
+	rm -f ${FORCELOCATION}/pinstall.final
+	
+
+	echo -e "\n========= POST-INSTALL ACTIONS ============\n"
+	
+	if [ "$HASDESKTOP" ]; then
+		echo "--- Updating menus ---"
+		fixmenus ; jwm -reload &>/dev/null || jwm -restart
+	fi
+	
+	if [ "$HASMIME" ]; then
+		echo "--- Updating MIME database ---"
+		update-mime-database /usr/share/mime
+	fi
+	
+	if [ "$HASICONS" ]; then
+		echo "--- Updating HICOLOR icon cache ---"
+		gtk-update-icon-cache -i -f /usr/share/icons/hicolor 
+	fi
+	
+	if [ "$HASFONTS" ]; then
+		echo "--- Updating FONTCONFIG cache ---"
+		fc-cache -r /usr/share/fonts/default
+	fi
+	
+	if [ "$HASMANUAL" ]; then
+		echo "--- Updating MAN database ---"
+		mandb -q
+	fi
+	
+	#rox -p /root/Choices/ROX-Filer/PuppyPin
+fi
+
+echo "** Done"
+
+if [ ! "$NOSTOP" ] 	; then
+	read aaa
+fi
+
+### END ###

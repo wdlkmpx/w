@@ -1,0 +1,191 @@
+#!/bin/sh
+# specic builds
+# ./ffmpeg_static.sfsbuild x86 : only i686 and x86_64
+# ./ffmpeg_static.sfsbuild arm
+# ./ffmpeg_static.sfsbuild param = any_other_value = "unified" sfs
+#
+
+##set -x
+
+S_COMP="-comp gzip" #xz gzip lzo lz4
+
+SPLIT=1
+if [ "$1" ] ; then
+	SPLIT=
+fi
+
+ARCHES='i686 amd64'
+#ARCHES='i686 amd64 armhf arm64' #armel
+
+case ${1} in 
+	x86) ARCHES='i686 amd64'  ;;
+	arm) ARCHES='armhf arm64' ;; #armel
+esac
+
+case $0 in
+	*unified*) SPLIT=  ;;
+	*all)      SPLIT=  ; ARCHES='i686 amd64 armhf arm64' ;;
+	*split)    SPLIT=1 ;;
+	*x86) SPLIT= ;;
+esac
+
+OUTPUT_DIR=${PWD}/output ; mkdir -p ${PWD}/output
+
+WGET='wget -c --no-check-certificate'
+
+mkdir -p tmp
+cd tmp
+
+mkdir -p ffmpegtmp
+
+#==============================================================
+#                    DOWNLOAD
+#==============================================================
+
+for i in $ARCHES
+do
+
+	# already done?
+	if [ -f ffmpeg-*-${i}-static/ffmpeg ] ; then
+		continue
+	fi
+
+	# already downloaded?
+	if [ -f ffmpeg-release-${i}-static.tar.xz ] ; then
+		echo "Verifying ffmpeg-release-${i}-static.tar.xz"
+		if ! tar -tf ffmpeg-release-${i}-static.tar.xz >/dev/null ; then
+			rm -f ffmpeg-release-${i}-static.tar.xz
+		fi
+	fi
+
+	# download
+	if [ ! -f ffmpeg-release-${i}-static.tar.xz ] ; then
+		echo "Downloading ffmpeg-release-${i}-static.tar.xz"
+		${WGET} https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${i}-static.tar.xz
+		[ $? -ne 0 ] && rm -f ffmpeg-release-${i}-static.tar.xz
+	fi
+
+	# extract
+	if [ ! -f ffmpeg-*-${i}-static/ffmpeg ] ; then
+		echo "Extracting ffmpeg-release-${i}-static.tar.xz"
+		tar -C ffmpegtmp -xf ffmpeg-release-${i}-static.tar.xz
+	fi
+
+done
+
+cd ffmpegtmp
+
+## ffmpeg-git-20181101-i686-static
+## ffmpeg-4.0.2-armhf-static
+VERSION=$(ls -d ffmpeg-*-amd64-static 2>/dev/null | head -1 | cut -f 2 -d '-')
+
+if [ -z "$VERSION" ] ; then
+	echo "ERROR: cannot deterine ffmpeg version"
+	exit 1
+fi
+
+FPKG="ffmpeg_static-${VERSION}-${ARCHES// /_}"
+FPKG=${FPKG//amd64/x86_64}
+FPKG=${FPKG//arm64/aarch64}
+
+#rm -rf ffmpeg-${VERSION}-static-all
+
+#==============================================================
+#                        PROCESS
+#==============================================================
+
+for i in $ARCHES
+do
+
+	if [ "$SPLIT" ] ; then
+		FPKG="ffmpeg_static-${VERSION}-${i}"
+		FPKG=${FPKG//amd64/x86_64}
+		FPKG=${FPKG//arm64/aarch64}
+		rm -rf ${FPKG}
+		cp -a ffmpeg-${VERSION}-${i}-static/ ${FPKG}
+		mkdir -p ${FPKG}/usr/local/bin
+		mkdir -p ${FPKG}/usr/share/doc
+		mv ${FPKG}/ffmpeg ${FPKG}/usr/local/bin/ffmpeg-static
+		ln -sv ffmpeg-static ${FPKG}/usr/local/bin/ffmpeg_static
+		mv ${FPKG}/ffprobe ${FPKG}/usr/local/bin/ffprobe-static
+		ln -sv ffprobe-static ${FPKG}/usr/local/bin/ffprobe_static
+		mv ${FPKG}/manpages ${FPKG}/usr/share/doc/ffmpeg_static
+		mv ${FPKG}/readme.txt ${FPKG}/usr/share/doc/ffmpeg_static/
+		if [ -d ${FPKG}/model ] ; then
+			mkdir -p ${FPKG}/usr/local/share
+			mv ${FPKG}/model ${FPKG}/usr/local/share/
+		fi
+		rm ${FPKG}/* 2>/dev/null
+		rm -f ${FPKG}.sfs
+		case ${i} in armhf|armel)
+			S_COMP='gzip' ;;
+		esac
+		if mksquashfs ${FPKG} ${FPKG}.sfs ${S_COMP} ; then
+			mv ${FPKG}.sfs ${OUTPUT_DIR}/
+		fi
+		continue
+
+	else ## not split
+
+		mkdir -p ${FPKG}/opt/ffmpeg/${i}
+		if [ -d ${FPKG}/opt/ffmpeg/armhf ] ; then
+			ln -snf armhf ${FPKG}/opt/ffmpeg/armv8
+			ln -snf armhf ${FPKG}/opt/ffmpeg/armv8l
+			ln -snf armhf ${FPKG}/opt/ffmpeg/armv7l
+			ln -snf armhf ${FPKG}/opt/ffmpeg/armv7
+		fi
+		if [ -d ${FPKG}/opt/ffmpeg/armel ] ; then
+			ln -snfv armel ${FPKG}/opt/ffmpeg/armv6l
+			ln -snfv armel ${FPKG}/opt/ffmpeg/armv6
+		fi
+		if [ -d ${FPKG}/opt/ffmpeg/arm64 ] ; then
+			ln -snfv arm64 ${FPKG}/opt/ffmpeg/aarch64
+		fi
+		if [ -d ${FPKG}/opt/ffmpeg/amd64 ] ; then
+			ln -snfv amd64 ${FPKG}/opt/ffmpeg/x86_64
+		fi
+
+		for f in ffmpeg ffprobe readme.txt #manpages
+		do
+			cp -a ffmpeg-${VERSION}-${i}-static/${f} ${FPKG}/opt/ffmpeg/${i}/
+		done
+
+		if [ -f ${FPKG}/opt/ffmpeg/manpages ] ; then
+			rm -rf ${FPKG}/opt/ffmpeg/manpages
+		fi
+		cp -a ffmpeg-${VERSION}-${i}-static/manpages ${FPKG}/opt/ffmpeg/
+
+		if [ -d ffmpeg-${VERSION}-${i}-static/model ] ; then
+			mkdir -p ${FPKG}/usr/local/share
+			cp -a ffmpeg-${VERSION}-${i}-static/model ${FPKG}/usr/local/share/
+		fi
+	fi
+done
+
+if [ "$SPLIT" ] ; then
+	exit
+fi
+
+#==============================================================
+
+mkdir -p ${FPKG}/usr/local/bin
+
+for app in ffmpeg ffprobe
+do
+	echo '#!/bin/sh' > ${FPKG}/usr/local/bin/${app}-static
+	if ! [ "$SPLIT" ] ; then
+		echo 'exec /opt/ffmpeg/$(uname -m)/'${app}' "$@"' >> ${FPKG}/usr/local/bin/${app}-static
+	fi
+	chmod +x ${FPKG}/usr/local/bin/${app}-static
+done
+ln -sv ffmpeg-static  ${FPKG}/usr/local/bin/ffmpeg_static
+ln -sv ffprobe-static ${FPKG}/usr/local/bin/ffprobe_static
+
+rm -f ${FPKG}.sfs
+mksquashfs ${FPKG} ${FPKG}.sfs ${S_COMP}
+sha256sum ${FPKG}.sfs > ${FPKG}.sfs.sha256.txt
+
+mv ${FPKG}.sfs ${OUTPUT_DIR}/
+mv ${FPKG}.sfs.sha256.txt ${OUTPUT_DIR}/
+
+### END ###

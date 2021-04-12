@@ -1,0 +1,24 @@
+[playlist]
+File1=http://s5.voscast.com:7736
+Title1=Free Talk Live 64k Broadband
+Length1=-1
+File2=http://fmt01.egihosting.com:21700/;stream/1
+Title2=LA Talk Radio Channel 1 Live
+Length2=-1
+File3=http://fmt01.egihosting.com:21702/;stream/1 
+Title3=LA Talk Radio Channel 2 Live
+Length3=-1
+File4=http://173.192.207.51:8042/stream
+Title4=TalkZone.com
+Length4=-1
+File5=http://77.92.76.190:9165
+Title5=Crime & Suspense Channel - ROK C Radio - OTR - Old Time Radio
+Length5=-1
+File6=http://64.27.3.104:3121/
+Title6=Rense Radio Network
+Length6=-1
+File7=http://s3.voscast.com:7204/
+Title7=http://www.k-talk.com
+Length7=-1
+NumberOfEntries=7
+Version=2

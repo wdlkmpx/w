@@ -1,0 +1,52 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+source_libs_sh # ncurses
+
+# ====================================================
+
+VER=3.0.5
+URL=https://github.com/htop-dev/htop/archive/refs/tags
+SRC=htop
+PKG=htop_static
+COMP=tar.gz
+DESC=""
+ncurses=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='usr/bin/htop'
+
+build() {
+	ncurses_build || exit 1
+	cd ${SRC}-${VER}
+	opts="--prefix=/usr --sysconfdir=/etc --disable-unicode"
+	# _configure also calls autogen.sh if configure is missing
+	# but I need configure to modify something
+	if [ ! -f configure ] && [ -f autogen.sh ] ; then
+		./autogen.sh
+	fi
+	sed -i 's/ac_cv_lib_ncurses6_refresh=no/ac_cv_lib_ncurses6_refresh=yes/' configure
+	_configure
+	_make
+
+	abort_if_file_not_found $SRC
+	_strip $SRC
+	standard_make_install
+}
+
+# main
+ncurses_download
+retrieve ${VER}.${COMP} ${SRC}-${VER}.${COMP}
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup

@@ -1,0 +1,59 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+source_libs_sh # libuuid
+
+# ====================================================
+
+VER=1.14.0
+URL=https://git.kernel.org/pub/scm/linux/kernel/git/jaegeuk/f2fs-tools.git/snapshot
+SRC=f2fs-tools
+PKG=f2fs-tools_static
+COMP=tar.gz
+DESC=""
+DEPS=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='sbin/fsck.f2fs'
+
+build() {
+
+	lib__sys_queue_install || exit 1
+	util_linux_build || exit 1 	#libuuid
+	cd ${SRC}-${VER}
+
+	opts="--prefix=/usr --sbin=/sbin --enable-static --disable-shared --without-selinux "
+	_configure
+
+	_make ${MKFLG} LDFLAGS="-all-static"
+
+	abort_if_file_not_found fsck/fsck.f2fs
+
+	strip_all_binaries
+	standard_make_install
+
+	fix_pkgconfig_for_toolchain
+	move_from_pkg_to_toolchain usr/lib
+	move_from_pkg_to_toolchain usr/include
+
+	ln -s fsck.f2fs fsck/resize.f2fs
+	ln -s fsck.f2fs fsck/defrag.f2fs
+}
+
+# main
+lib__sys_queue_download
+util_linux_download #libuuid
+retrieve ${SRC}-${VER}.${COMP}
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup

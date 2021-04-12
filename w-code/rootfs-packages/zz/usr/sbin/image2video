@@ -1,0 +1,99 @@
+#!/bin/sh
+#w__ 2015
+
+inputfile="$@"
+
+case $inputfile in
+	/*) echo -n ;;
+	*) inputfile="${PWD}/${inputfile}"
+esac
+
+export inputfile filenoext audiofile extraopts exe
+
+which avconv &>/dev/null && exe='avconv'
+which ffmpeg &>/dev/null && exe='ffmpeg'
+[ -z "$exe" ] && echo "* ERROR: could not find avconv nor ffmpeg" && exit 1
+
+case "$inputfile" in
+	*.jpg|*.jpeg|*.png|*.bmp|*.gif) ISIMAGE=1 ;;
+	*.mp3|*.MP3|*.flac|*.wav) ISAUDIO=1 ;;
+esac
+
+filenoext="${inputfile%.*}"
+ext="${inputfile##*.}"
+dir="${inputfile%/*}"
+
+if [ ! "$ISAUDIO" ] ; then
+	if [ -f "${filenoext}.flac" ] ; then
+		audioinput='-i'
+		audiofile=${filenoext}.flac
+	elif [ -f "${filenoext}.wav" ] ; then
+		audioinput='-i'
+		audiofile=${filenoext}.wav
+	elif [ -f "${filenoext}.mp3" ] ; then
+		audioinput='-i'
+		audiofile=${filenoext}.mp3
+	else
+		audiofile="$(yad --title="Select Audio File" --file \
+			--filename="$dir/*" --width="640" --height="480" \
+			--center --on-top --button="gtk-ok:0" --button="gtk-cancel:1"
+		)"
+		[ ! "$audiofile" ] && echo "User cancelled operation" && exit 1
+	fi
+else
+	audioinput='-i'
+	audiofile=${inputfile}
+	inputfile=""
+fi
+
+if [ ! "$ISIMAGE" ] ; then
+	inputfile="$(yad --title="Select IMAGE File" --file \
+		--filename="$dir/*" --width="640" --height="480" \
+		--center --on-top --button="gtk-ok:0" --button="gtk-cancel:1"
+	)"
+	[ ! "$inputfile" ] && echo "User cancelled operation" && exit 1
+fi
+
+filenoext="${inputfile%.*}"
+dir="${inputfile%/*}"
+
+#########################################################
+
+frameratecombo='1!^4!10!15!20!25!30'
+sizecombo="^Original!1280x720!640x360!800x600!640x480"
+
+dialog_result=$(yad --title="image2video" \
+--center --fixed --borders="4" --buttons-layout="center" \
+--separator="|" --form  \
+--field="Image: ${inputfile##*/}:LBL" "" \
+--field="Audio: ${audiofile##*/}:LBL" "" \
+--field="Frame rate:CB" "$frameratecombo" \
+--field="Size:CB" "$sizecombo" \
+--button="gtk-ok:0" \
+--button="gtk-cancel:10")
+if [ $? -ne 0 -o -z "$dialog_result" ] ; then
+	echo "User cancelled operation" 
+	exit 1
+fi
+
+IFS="|" read -r imgf audiof framerate size <<< "$dialog_result"
+
+if [ "$size" = "Original" ] ; then
+	extraopts="-r ${framerate}"
+else
+	extraopts="-r ${framerate} -s $size"
+fi
+
+function EncodeMKV() {
+	#-i image.jpg -i audio.wav 
+	$exe -loop 1 -i "$inputfile" -i "$audiofile" -c:a copy \
+		-c:v libx264 $extraopts -tune stillimage -strict \
+		experimental -pix_fmt yuv420p -shortest "${filenoext}.mkv"
+	if [ $? -ne 0 ] ; then
+		echo -e "\nAN ERROR OCCURED. HIT ENTER TO CONTINUE" ; read var
+	fi
+}
+export -f EncodeMKV
+exec xterm -e bash -c EncodeMKV
+
+### END ###

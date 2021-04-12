@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=pCueSplit
+GenericName=Sound Splitter
+Icon=/usr/share/pixmaps/puppy/cdrom.svg
+Type=Application
+Exec=pcuesplit -gui
+StartupNotify=false
+Terminal=false
+MimeType=application/x-cue
+

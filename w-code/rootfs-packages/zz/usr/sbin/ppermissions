@@ -1,0 +1,103 @@
+#!/bin/sh
+#w__ 2015
+
+case $1 in
+	-global|-puppy|-nobody|-readonly|-portable)
+		action=${1#-}
+		shift
+		;;
+esac
+
+file="$@"
+if [ -e "$file" ]; then
+	[[ $file != /* ]] && file=$(pwd)/"${file}"  #inputdir is in $(pwd)
+else
+	echo "$file does not exist"
+	exit 1
+fi
+if [ -d "$file" ] ; then
+	echo "dir: "${file}""
+else
+	echo "file: "${file}""
+fi
+
+if [ ! "$action" ] ; then
+  if [ "$DISPLAY" ]; then #yad - gtk 
+	res=$(yad --title="zzpermissions" --buttons-layout=center \
+	--width=350 --height=250 --center  \
+	--separator="\n" --list --radio-list \
+	--column="action" --column="description" \
+	"global" "Give all permissions to all users" \
+	"portable" "Permissions for portable software/data" \
+	"nobody" "User nobody owns this file" \
+	"puppy" "Puppy default root user permissions" \
+	"readonly" "root owner, but read-only for everyone"
+	)
+	[ ! "$res" ] && echo "User cancelled operation" && exit 2
+	read -r action <<< "$res"
+
+  else #console
+	echo -n "
+	ACTION		DESCRIPTION
+	------		-----------
+	global 		Give all permissions to all users
+	portable	Permissions for portable software/data
+	nobody		User nobody owns this file	
+	puppy		Puppy default root user permissions
+	readonly	root owner, but read-only for everyone
+Type ACTION: "
+	read action
+  fi
+fi
+
+#############################################################
+
+echo "action: $action"
+
+[ -d "$file" ] && opt='-R'
+
+case $action in
+	global)
+		chmod ${opt} 777 "${file}"
+		chown ${opt} nobody:65534 "${file}"
+		;;
+	portable)
+		chmod ${opt} 666 "${file}"
+		chown ${opt} nobody:65534 "${file}"
+		if [ -d "$file" ] ; then
+			#directory
+			find "$file" -type f | while read filex ; do
+				file2check=$(file "$filex")
+				case "$file2check" in
+					*shared?object*) chmod 777 "${filex}" ;;
+					*executable*)	 chmod 777 "${filex}" ;;
+				esac
+			done
+		else
+			#file
+			file2check=$(file "$file")
+			case "$file2check" in
+				*shared?object*) chmod 777 "${file}" ;;
+				*executable*)	 chmod 777 "${file}" ;;
+			esac
+		fi
+		;;
+	puppy)
+		chmod ${opt} 755 "${file}"
+		chown ${opt} root:0 "${file}"
+		;;
+	nobody)
+		#chmod ${opt} 755 "${file}"
+		chown ${opt} nobody:65534 "${file}"
+		;;
+	readonly)
+		chmod ${opt} 644 "${file}"
+		chown ${opt} root:0 "${file}"
+		;;
+	*) 
+		echo 'error: unrecognized action' 
+		exit 1 
+		;;
+esac
+
+### END ###

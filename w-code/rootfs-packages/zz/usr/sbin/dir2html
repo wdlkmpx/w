@@ -1,0 +1,263 @@
+#!/bin/sh
+#w__ 2015
+
+case $1 in -help|--help|"")
+	echo "Syntax: dir2html [-v2|-txt] <dir>" ;;
+esac
+
+fx_format_bytes() {
+	[ $1 ] || return
+	local BYTES=$1
+	local FORMATTEDSIZE="${BYTES}B" # bytes
+	if [ ${BYTES} -ge 1099511627776 ] ; then
+		FORMATTEDSIZE="`dc -e "$BYTES 1099511627776 2 k / p"`"
+		FORMATTEDSIZE="`LANG=C printf "%.2f" $FORMATTEDSIZE` T" #terabytes
+	elif [ ${BYTES} -ge 1073741824 ] ; then
+		FORMATTEDSIZE="`dc -e "$BYTES 1073741824 1 k / p"`"
+		FORMATTEDSIZE="`LANG=C printf "%.1f" $FORMATTEDSIZE` G" # gigabytes
+	elif [ ${BYTES} -ge 1048576 ] ; then
+		FORMATTEDSIZE="$(( $BYTES / 1048576 )) M" # megabytes
+	elif [ ${BYTES} -ge 1024 ] ; then
+		FORMATTEDSIZE="$(( $BYTES / 1024 )) K" # kilobytes
+	fi
+	echo "$FORMATTEDSIZE"
+}
+
+#############################################################
+
+fileX="$@"
+if ! [ -d "$fileX" ]; then
+	fileX=$(yad --file --directory \
+	--filename="$DEFAULTINPUTDIR" \
+	--width=640 --height=480 \
+	--center --title="Select Directory" \
+	--button=gtk-ok:0 --button=gtk-cancel:1)
+	[ ! -d "$fileX" ] && echo "User cancelled operation" && exit 1
+	echo -n ${fileX} > ${defdirfile} #save last input directory
+fi
+fileX="$(realpath "$fileX")"
+echo $fileX
+
+export DIR="$fileX"
+export INPUTDIR="$fileX"
+export INPUTDIR_PARENT=${DIR%/*} #dirname
+export INPUTDIR_NAME=${DIR##*/}  #basename
+
+savedirfile=${HOME}/.config/dir2html.savedir
+[ -f "$savedirfile" ] && read -r SAVEDIR < ${savedirfile}
+[ ! -d "$SAVEDIR" ] && SAVEDIR=${INPUTDIR_PARENT}
+
+defdirfile=${HOME}/.config/dir2html.definputdir
+[ -f "$defdirfile" ] && read -r DEFAULTINPUTDIR < ${defdirfile}
+[ ! -d "$DEFAULTINPUTDIR" ] && DEFAULTINPUTDIR=${INPUTDIR_PARENT}
+
+##---------------------------------------
+##----- PROCESS START - DIALOGS ---------
+##---------------------------------------
+
+SAVE_AS=${SAVEDIR}/${INPUTDIR_NAME}.list
+OUTPUT_FILE=$(yad --file --save \
+	--filename="$SAVE_AS" \
+	--width=640 --height=480 \
+	--center --title="Save As..." \
+	--window-icon="/usr/share/pixmaps/dir2html.png" \
+	--button="HTML:0" \
+	--button="HTML fast:2" \
+	--button="TEXT (plain):4" \
+	--button=gtk-cancel:10
+)
+case $? in
+	0) ok=1 ;;
+	2) v2=1 ; OUTFORMAT="html" ;;
+	4) v2=1 ; OUTFORMAT="txt"  ;;
+	*) exit ;;
+esac
+[ ! "$OUTPUT_FILE" ] && exit 1
+echo -n ${OUTPUT_FILE%/*} > ${savedirfile}
+
+if [ "$v2" ]; then
+	if [ "$OUTFORMAT" = "html" ]; then 
+		DIRTITLE=${INPUTDIR_NAME}
+		case $OUTFORMAT in
+			*.html) ok=1;;
+			*) OUTPUT_FILE="${OUTPUT_FILE}.${OUTFORMAT}"
+		esac
+		tree -aCN --si --dirsfirst --charset "UTF-8" --nolinks \
+			-H "$DIRTITLE" -T "" -o "$OUTPUT_FILE" "$INPUTDIR"
+	else
+		case $OUTFORMAT in
+			*.txt) ok=1;;
+			*) OUTPUT_FILE="${OUTPUT_FILE}.${OUTFORMAT}"
+		esac
+		tree -aCN --si --dirsfirst --charset "UTF-8" \
+			-o "$OUTPUT_FILE" "$INPUTDIR"
+	fi
+	sed -i \
+		-e '/by Steve/d' \
+		-e '/copyleft/d' \
+		-e '/by Kyosuke/d' \
+		-e '/<hr>/d' \
+		-e "/Made by 'tree'/d" \
+		"$OUTPUT_FILE"
+	unix2dos "$OUTPUT_FILE" #Windows compat#
+	exit
+fi
+
+##-----------------------------
+##-------- PROCESS ------------
+##-----------------------------
+
+case $OUTFORMAT in
+	*.html) ok=1;;
+	*) OUTPUT_FILE="${OUTPUT_FILE}.html"
+esac
+
+tmp_out_file='/tmp/dir2htm_AOUTFILE'
+tmpout='/tmp/dir2htm_tmpout'
+tmplist='/tmp/dir2htm_tmplist'
+
+export TOTAL_SIZE=0
+export TOTAL_FILES=0
+export TOTAL_FOLDERS=0
+
+echo -e "Please wait. Processing dirs..." | yad --text-info \
+	--back="orange" --justify="center" --fontname="Arial Unicode MS 14" \
+	--width="400" --height="48" --sticky --fixed --center --on-top \
+	--undecorated --no-buttons --borders="0" &   # & = backgrounded
+SPLASH_PID=$!
+
+echo "" > $tmpout
+du -b -a "$DIR" \
+	| while read s f ; do echo $s $f ; done \
+	| sort -k 2 -t ' ' > $tmplist
+INPUTDIR_PARENT=${INPUTDIR_PARENT}'/' 
+__DATE=$(date "+%Y-%m-%d %H:%M")
+
+toggle=0
+
+#find "$DIR" -printf "%s %P\n" | sort -k 2 -t ' '
+while read -r filebytes filezz
+do
+	#filezz is a DIRECTORY
+	if [ -d "$filezz" ]; then
+		#if previous dir, write dir info
+		if [ "$previousdir" ]; then
+			fb=$(fx_format_bytes $foldersize)
+			echo "	<TR class=dir><TD> ${ONEDIR#$INPUTDIR_PARENT} ($count) </TD> <TD> ${fb} </TD></TR> " >> $tmpout
+			[ $count -ge 1  ] && echo "$dirfiles" >> $tmpout #FILELIST
+			TOTAL_FILES=$((TOTAL_FILES+count))
+			TOTAL_SIZE=$((TOTAL_SIZE+foldersize)) #bytes count
+		fi
+		#CURRENTDIR: reset info
+		count=0 
+		foldersize=0 
+		filebytes=0 
+		filename=""
+		toggle=0 #0-1
+		class="" #file, file2
+		dirfiles=""
+		ONEDIR="$filezz"
+		previousdir="$filezz"
+		let TOTAL_FOLDERS++
+		continue
+
+	#any other filetype, create FILELIST and update info
+	else
+		if [ $toggle -eq 0 ]; then 
+			class="file"; toggle=1
+		else
+			class="file2"; toggle=0
+		fi
+		filename=${filezz##*/} #basename
+		if [ ! "$filename" ] ; then
+			continue
+		fi
+		fb=$(fx_format_bytes $filebytes)
+		dirfiles="$dirfiles
+	<TR class=$class><TD> $filename </TD><TD> ${fb} </TD></TR>"
+		count=$((count + 1))
+		foldersize=$((foldersize+filebytes)) #bytes count
+		continue
+	fi
+done < $tmplist
+
+#if there is only 1 directory, the results won't be displayed because @@previous dir@ won't be triggered
+if [ $TOTAL_FOLDERS -eq 1 ]; then
+	fb=$(fx_format_bytes $foldersize)
+	echo "	<TR class=dir><TD> ${ONEDIR#$INPUTDIR_PARENT} ($count) </TD> <TD> ${fb} </TD></TR> " >> $tmpout
+	[ $count -ge 1  ] && echo "$dirfiles" >> $tmpout #FILELIST
+	TOTAL_FILES=$((TOTAL_FILES+count))
+	TOTAL_SIZE=$((TOTAL_SIZE+foldersize)) #bytes count
+fi
+
+##------------------------------------
+##------------ HTML OUTPUT -----------
+##------------------------------------
+
+(
+##(1) write first HTML chunk
+fb=$(fx_format_bytes $TOTAL_SIZE)
+echo "<HTML>
+<HEAD>
+<meta http-equiv=content-type content=text/html; charset=utf-8>
+<TITLE> $DIR </TITLE>
+<STYLE>
+	table#x {background-color:#223344;border:1px solid black; border-collapse:collapse;}
+	.h1{background-color: #223344;color:#ccdddd;font-weight:bold;text-align:center;}
+	.h2{background-color: #223344;color:#ccddff;font-weight:normal;text-align:center;}
+	.h3{background-color: #223344;color:#ccddee;font-weight:bold;text-align:center;}
+	.dir{background-color: #666677;color:#ffffff;font-weight:normal;text-align:left;font-size:15px}
+	.file{background-color:#eeeeee;color:#000000;font-weight:normal;text-align:left;font-size:13px}
+	.file2{background-color:#D8D8D8;color:#000000;font-weight:normal;text-align:left;font-size:13px}
+</STYLE>
+</HEAD>
+
+<BODY>
+
+<TABLE CELLSPACING=0 CELLPADDING=0 border=0 bgcolor=#223344>
+
+	<TR><TD>
+	<TABLE CELLSPACING=0 CELLPADDING=1 align=center border=0>
+	<TR class=h1><TD> Generated on $__DATE </TD></TR>
+	<TR class=h2><TD> $TOTAL_FILES files <font color=red>~</font> $TOTAL_FOLDERS folders <font color=red>~</font> ${fb} </TD></TR>
+	</TABLE>
+	<TD></TR>
+
+	<TR><TD>
+	<TABLE CELLSPACING=0 CELLPADDING=1 border=0 width=100%>
+	<!-- <TR class=h3><TD>Name</TD><TD>Size</TD></TR> -->"
+
+##(2) write all processed dirs & files in html format
+cat $tmpout
+
+##(3) write last HTML chunk
+echo "	</TABLE>
+	<TD></TR>
+
+</TABLE>
+</BODY>
+</HTML>"
+) > $tmp_out_file
+
+## move output file to selected path
+mv -fv "$tmp_out_file" "$OUTPUT_FILE" 
+unix2dos "$OUTPUT_FILE"  ## Windows compat
+
+##------ CLEANUP ---------
+rm -fv $tmpout
+rm -fv $tmplist
+rm -fv $tmp_out_file
+
+kill $SPLASH_PID
+
+echo "Done creating HTML list" | 
+	yad --title="dir2html" \
+	--window-icon="/usr/share/pixmaps/dir2html.png" \
+	--text-info --margins="10" --wrap --back="#ddefed" \
+	--button="Close:0" --button="Open Dir:10" --button="Open File:20" \
+	--center --fixed --timeout="20"
+ret=$?
+[ $ret -eq 10 ] && pcmanfm "$OUTPUT_FILE"
+[ $ret -eq 20 ] && defaultbrowser "$OUTPUT_FILE" &
+
+### END ###

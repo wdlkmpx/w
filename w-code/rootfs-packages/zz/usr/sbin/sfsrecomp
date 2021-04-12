@@ -1,0 +1,97 @@
+#!/bin/sh
+
+#set -x
+
+usage() {
+	echo "
+  ${0##*/} <file> <newcomp>
+"
+	exit
+}
+
+if ! [ "$1" ] ; then
+	usage
+fi
+
+if ! [ -f "$1" ] ; then
+	usage
+fi
+
+if ! [ "$2" ] ; then
+	usage
+fi
+
+SFS_FILE=$(realpath "$1")
+SFS_COMP=$2
+
+SFS_SUPPORTED_COMP=
+for i in lz4 gzip xz lzma lzo
+do
+	if mksquashfs --help 2>&1 | grep -q ${i} ; then
+		SFS_SUPPORTED_COMP="$SFS_SUPPORTED_COMP $i"
+	fi
+done
+SFS_SUPPORTED_COMP="$SFS_SUPPORTED_COMP "
+#echo "$SFS_SUPPORTED_COMP"
+
+if ! [ "$(echo "$SFS_SUPPORTED_COMP" | grep " $SFS_COMP ")" ] ; then
+	echo "$SFS_COMP: compression not supported"
+	exit 1
+fi
+
+old_sfs_comp=$(unsquashfs -s "$SFS_FILE" | grep Compression | cut -f 2 -d ' ')
+
+if [ "$SFS_COMP" = "$old_sfs_comp" ] ; then
+	echo "Already using the target compression format"
+	exit 2
+fi
+
+if [ -f /proc/config.gz ] ; then
+	if [ "$SFS_COMP" = "lz4" ] ; then
+		if zcat /proc/config.gz | grep 'CONFIG_SQUASHFS_LZ4 is not set' ; then
+			echo "lz4 is not supported by aufs in the current kernel.. you will not able to mount the sfs file"
+			exit 1
+		fi
+	elif [ "$SFS_COMP" = "lzo" ] ; then
+		if zcat /proc/config.gz | grep 'CONFIG_SQUASHFS_LZO is not set' ; then
+			echo "lzo is not supported by aufs in the current kernel.. you will not able to mount the sfs file"
+			exit 2
+		fi
+	fi
+fi
+
+touch "$SFS_FILE".$$.sfsrecomp
+sync
+if ! [ -f "$SFS_FILE".$$.sfsrecomp ] ; then
+	echo "need write access"
+	exit 3
+fi
+rm -f "$SFS_FILE".$$.sfsrecomp
+
+SFS_DIR=${SFS_FILE%.*}
+
+rm -rf "${SFS_DIR}"
+
+# unsquashfs must create the directory
+# other it fails
+
+if ! unsquashfs -d "${SFS_DIR}" "${SFS_FILE}" ; then
+	echo "Failed to extract sfs archive.."
+	exit 4
+fi
+sync
+
+if mksquashfs "${SFS_DIR}" "${SFS_FILE}".new -comp ${SFS_COMP}; then
+	sync
+	mv "${SFS_FILE}".new "${SFS_FILE}"
+	rm -rf "${SFS_DIR}"
+	sync
+	echo "Done!"
+else
+	rm -f "${SFS_FILE}".new
+	echo "Failed -- keeping original file..."
+	rm -f "${SFS_DIR}"
+	sync
+	exit 5
+fi
+

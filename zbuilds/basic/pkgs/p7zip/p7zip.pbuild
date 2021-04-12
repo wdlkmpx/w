@@ -1,0 +1,64 @@
+# p7zip
+
+. ../versions
+. ../../func
+. ../../build.conf
+
+# reset this when a new version is released
+BUILD=rev2
+
+VER=$p7zip_ver
+URL=https://sourceforge.net/projects/p7zip/files/p7zip/${VER}
+PKG=p7zip
+SRCVER=${PKG}_${VER}_src_all
+COMP=tar.bz2
+DESC="file archiver with the highest compression ratio"
+DEPS=
+CAT=BuildingBlock
+DESKTOP=
+CWD=$(pwd)
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+
+ARCH=$(uname -m)
+case $ARCH in
+ #*64) LIBDIR=lib64 ;;
+ *) LIBDIR=lib ;;
+esac
+
+build() {
+	mkdir -p $CWD/${PKG}-install/usr/bin
+	mkdir -p $CWD/${PKG}-install/usr/share/man/man1
+	mkdir -p $CWD/${PKG}-install/usr/share/doc
+	mkdir -p $CWD/${PKG}-install/usr/libexec/$PRGNAM
+	mv -f ${PKG}_${VER} ${PKG}-${VER}
+	cd ${PKG}-${VER}
+	#===
+	patch -p1 < ../p7zip_16.02_lzip-1.diff
+	#===
+	cp makefile.linux_any_cpu makefile.machine
+	# "Stolen" from gentoo
+	sed -i -e "s:OPTFLAGS=-O:OPTFLAGS=${CXXFLAGS}:" -e 's:-s ::' makefile*
+	make sfx
+	make 7z
+	#make all3
+	[ "$?" -eq 0 ] || exit
+	rm -f bin/7za bin/7zr
+	ln -sv 7z bin/7za
+	ln -sv 7z bin/7zr
+	cp -ap bin/* $CWD/${PKG}-install/usr/libexec/$PRGNAM
+	cp -ap man1/* $CWD/${PKG}-install/usr/share/man/man1
+	mv contrib/gzip-like_CLI_wrapper_for_7z/p7zip contrib/gzip-like_CLI_wrapper_for_7z/7zg
+	cp contrib/gzip-like_CLI_wrapper_for_7z/7zg $CWD/${PKG}-install/usr/bin
+	ln -sv /usr/libexec/7z $CWD/${PKG}-install/usr/bin/7z
+	ln -sv /usr/libexec/7z $CWD/${PKG}-install/usr/bin/7za
+	ln -sv /usr/libexec/7z $CWD/${PKG}-install/usr/bin/7zr
+	chmod 755 $CWD/${PKG}-install/usr/libexec/*
+	cd -
+}
+
+# main
+retrieve ${SRCVER}.${COMP}
+extract ${SRCVER}.${COMP}
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT
+

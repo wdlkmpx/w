@@ -1,0 +1,12 @@
+[Desktop Entry]
+Encoding=UTF-8
+GenericName=LXTerminal
+Name=LXTerminal
+Comment=LXTerminal terminal emulator
+Exec=lxterminal
+Terminal=false
+Type=Application
+Icon=lxterminal.png
+Categories=TerminalEmulator
+
+

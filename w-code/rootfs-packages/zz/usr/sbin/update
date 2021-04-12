@@ -1,0 +1,87 @@
+#!/bin/sh
+#w__ 2015
+
+if [ "$1" ] ; then
+	action="$1"
+else
+	res=$(yad --title="update" --no-buttons \
+	--width=350 --height=345 --center --sticky --on-top \
+	--separator="\n" --list --radio-list \
+	--column="action" --column="description" \
+	"youtube-dl" "youtubedl -update" \
+	"ca-certificates" "update-ca-certificates" \
+	)
+	
+	[ ! "$res" ] && echo "User cancelled operation" && exit 2
+
+	read -r action <<< "$res"
+	XTERM="xterm +hold -e"
+fi
+  
+case "$action" in
+	youtube\-dl|youtubedl) 		exec xterm -e youtubedl -update ;;
+	ca\-certificates|cacert) 	exec xterm -e update-ca-certificates ;;
+	unetbootin)	 	 			exec unetbootin -update ;;
+	getflash) 					exec getflash ;;
+	auto)						true ;;
+	inxi)						INXI=1 ;;
+	speedtest)					SPEEDTEST=1 ;;
+	*) echo 'diraction error: unrecognized action' ; exit 1 ;;
+esac
+ 
+if [ "$INXI" ] ; then
+	[ ! "$DESTDIR" ] && DESTDIR=/usr/sbin
+	cd /tmp
+	wget --no-check-certificate "https://raw.githubusercontent.com/smxi/inxi/master/inxi"
+	if [ $? -eq 0 ] ; then
+		chmod +x inxi
+		mv -fv inxi ${DESTDIR}
+	else
+		rm -f inxi
+	fi
+	exit
+fi
+
+if [ "$SPEEDTEST" ] ; then
+	[ ! "$DESTDIR" ] && DESTDIR=/usr/sbin
+	cd /tmp
+	wget --no-check-certificate "https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest_cli.py"
+	if [ $? -eq 0 ] ; then
+		chmod +x speedtest_cli.py
+		mv -fv speedtest_cli.py ${DESTDIR}
+	else
+		rm -f speedtest_cli.py
+	fi
+	exit
+fi
+
+
+#################################################
+#					AUTO						#
+#################################################
+# update only Sundays
+
+sunlock=${HOME}/.config/update.sunlock
+
+day=$(date)
+day=${day%% *}
+day=${day,,}
+echo $day
+
+if [ "$day" = "sun" ] ; then
+	if [ -f "$sunlock" ] ; then
+		echo 'already updated for today'
+	else
+		sleep 20
+		xterm -e youtubedl -update
+		xterm -e update-ca-certificates
+		update-smart-drivedb #####
+		echo >  "$sunlock"
+	fi
+else
+	echo "not today"
+	rm -fv $sunlock
+fi
+
+
+### END ###

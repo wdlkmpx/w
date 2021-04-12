@@ -1,0 +1,301 @@
+#!/bin/sh
+#w__ 2015
+
+function UpdateGTK() {
+	#gtk-update-icon-cache -f -t /usr/share/icons/hicolor
+	gtk-query-immodules-2.0 --update-cache 2>/dev/null
+	gtk-query-immodules-3.0 --update-cache 2>/dev/null
+}
+function RemoveSCIM() {
+	sed -i '/#scim#/d' /root/.xinitrc
+	sed -i '/scim/d' /etc/gtk-2.0/gtk.immodules
+	[ -f /usr/lib/gtk-3.0/3.0.0/immodules.cache ] && sed -i '/scim/d' /usr/lib/gtk-3.0/3.0.0/immodules.cache
+}
+function InstallSCIM() {
+	UpdateGTK
+	sed -i '/#scim#/d' /root/.xinitrc #remove possible previous entry
+	replace='CURRENTWM=' #jwm
+	[ "$(busybox pgrep /usr/bin/icewm)" ] && replace='which $CURRENTWM' #icewm
+	str="if [ -x /usr/bin/scim ]; then		#scim#\n	export XMODIFIERS=\"@im=SCIM\"	#scim#\n	export LC_CTYPE=en_US.UTF-8		#scim#\n	export GTK_IM_MODULE=\"scim\"		#scim#\n	export QT_IM_MODULE=\"scim\"		#scim#\n	/usr/bin/scim -d 	\t\t\t#scim#\nfi	#scim#\n	#scim#\n${replace}"
+	sed -i "s|${replace}|$str|" /root/.xinitrc
+}
+
+
+case $1 in
+	-norestart) NORESTART=1 ; shift ;;
+	-remaster) REMASTER=1 ; shift ;;
+esac
+
+CONFIGDIR=${HOME}/.config/performance
+mkdir -p $CONFIGDIR
+
+###### CHECK PROGRAMS AVAILABILITY #######
+[ -x /usr/bin/jwm ] && JWM=1
+[ -x /usr/bin/icewm ] && ICEWM=1
+[ -x /usr/bin/openbox ] && OPENBOX=1	#lxpup
+[ -x /usr/bin/startlxde ] && LXDE=1		#lxpup
+
+###### IDENTIFY THE CURRENT WINDOW MANAGER ###########
+WM=''
+if [ "$(pidof jwm)" ] ; then		 RUNNINGWM='jwm'
+elif [ "$(pidof icewm)" ] ; then	 RUNNINGWM='icewm'
+elif [ "$(pidof lxsession)" ] ; then RUNNINGWM='startlxde'	#lxpup
+elif [ "$(pidof openbox)" ] ; then	 RUNNINGWM='openbox'	#lxpup
+fi
+
+read -r WM < /etc/windowmanager
+
+if [ "$WM" != "$RUNNINGWM" ] ; then
+	echo "*** Running with another window manager than the specified"
+	changed="$changed window_manager" #mark as changed
+fi
+
+[ "$JWM" ] && wmcombo=jwm
+[ "$ICEWM" ] && wmcombo=${wmcombo}!icewm
+[ "$OPENBOX" ] && wmcombo=${wmcombo}!openbox	#lxpup
+[ "$LXDE" ] && wmcombo=${wmcombo}!startlxde		#lxpup
+wmcombo=${wmcombo//${WM}/^${WM}}
+wminputvalue=$WM
+echo $wmcombo
+
+################### GET VALUES #####################
+
+defaultresolution="800x600"
+defaultdpi="96"
+
+#--------------- RESOLUTION ----------------
+
+if [ -f /etc/X11/xorg.conf ] ; then
+	xorgconf='/etc/X11/xorg.conf'
+else
+	xorgconf='/etc/X11/xorg.conf-auto-pc'
+fi
+
+echo "xorg.conf: using ${xorgconf}"
+
+#'xdpyinfo' utility
+#resinputvalue=$(xdpyinfo | grep 'dimensions:' | awk '{print $2}')
+resinputvalue=$(grep 'screen0modes' ${xorgconf} | grep -o 'Modes.*' | tr -s ' ' | cut -d ' ' -f2 | sed -e 's|"||g')
+echo "Current Resolution: $resinputvalue"
+rescombo="!1366x768!1024x768!800x600!640x480"
+if [[ "$resinputvalue" == *x* ]] ; then 
+	rescombo="1366x768!1024x768!800x600!640x480"
+	rescombo=${rescombo//$resinputvalue/^$resinputvalue}
+fi
+
+#--------------- Color Depth -----------------
+#depthinputvalue=$(xdpyinfo | grep 'depth:' | head -1 | awk '{print $2}')
+depthinputvalue=$(grep 'screen0depth' ${xorgconf} | grep -o 'Depth.*' | tr -s ' ' | cut -d ' ' -f2)
+echo "Current Color Depth: $depthinputvalue"
+depthcombo="!16 bits!24 bits!32 bits"
+if [[ $depthinputvalue == *[0-9][0-9]* ]] ; then 
+	depthcombo="16 bits!24 bits!32 bits"
+	depthcombo=${depthcombo//$depthinputvalue/^$depthinputvalue}
+fi
+
+#--------------- Font DPI ---------------- *dots per inch
+dpivalues="54!60!66!72!78!84!90!96!102!108"
+dpiline=$(grep "Xft.dpi" /root/.Xresources)
+dpiinputvalue=${dpiline##Xft.dpi: } ##
+echo "Current DPI: $dpiinputvalue"
+dpicombo=${dpivalues//$dpiinputvalue/^$dpiinputvalue}
+
+#------------ TASKBAR -----------------
+taskbstr="--field=Autohide task bar:CHK"
+case $WM in
+	jwm)
+		if [ "$(grep -iE 'autohide="true"|autohide="on"' /root/.jwmrc-tray)" ] ; then
+			taskbinputcheck="TRUE"
+		else
+			taskbinputcheck="FALSE"
+		fi
+		;;
+	icewm)
+		if [ "$(grep 'TaskBarAutoHide=1' /root/.icewm/preferences)" ] ; then
+			taskbinputcheck="TRUE"
+		else
+			taskbinputcheck="FALSE"
+		fi
+		;;
+esac
+
+#---------------- IME -----------------
+if [ -x /usr/bin/scim ]; then	#file exists
+	imestr="--field=SCIM_(Input_Method):CHK"
+	imetype="SCIM"
+	imeinputcheck="FALSE"
+	[ "$(grep '#scim#' /root/.xinitrc)" != "" ] && imeinputcheck="TRUE"
+fi
+if [ ! "$imetype" ] ; then
+	imestr="--field=:LBL"
+	imetype=""
+	imeinputcheck="@disabled"
+fi
+if [ "$WM" != 'jwm' -a "$WM" != 'icewm' ] || [ "$REMASTER" ] ; then
+	imestr=""
+	imetype=""
+	imeinputcheck=""
+	taskbstr=""
+fi
+
+#---------------- browser -----------------
+[ -x /usr/bin/qtweb ] && browsercombo=qtweb
+[ -x /usr/bin/palemoon ] && browsercombo=${browsercombo}!palemoon
+[ -x /usr/bin/firefox ] && browsercombo=${browsercombo}!firefox
+[ -x /usr/bin/seamonkey ] && browsercombo=${browsercombo}!seamonkey
+[ -x /usr/bin/google-chrome ] && browsercombo=${browsercombo}!google-chrome
+[ -x /usr/bin/opera ] && browsercombo=${browsercombo}!opera
+browser=$(sed -e '/#.*/d' -e 's/.*exec //' -e 's/^ //g' -e 's/^\t//' -e '/^$/d' -e 's/ .*//' /usr/local/bin/defaultbrowser | head -1 )
+browsercombo=${browsercombo//${browser}/^${browser}}
+browserinputvalue=$browser
+echo $browsercombo
+
+###################### DIALOG #######################
+[ "$REMASTER" ] && extrastr="(Remaster)"
+
+dialog_result=$(yad --title="Performance settings $extrastr" \
+	--center --fixed --borders="4" --buttons-layout="center" \
+	--columns=2 --separator="\n" --form  \
+	--field="Xorg res:CB" "$rescombo" \
+	--field="Xorg depth:CB" "$depthcombo" \
+	--field="Font DPI:CB" "$dpicombo" \
+	--field="WM:CB" "$wmcombo" \
+	--field="Browser:CB" "$browsercombo" \
+	"$imestr" "$imeinputcheck" \
+	"$taskbstr" "$taskbinputcheck" \
+	--field="glxgears...:BTN" "xterm -hold -e glxgears" \
+	--field="report-video...:BTN" "xterm -hold -e report-video" \
+	--field="xorgwizard...:BTN" "xorgwizard" \
+	--field="[File] ${xorgconf}:BTN" "geany ${xorgconf}" \
+	--button="OK:0" \
+	--button="Close:10")
+if [ $? -ne 0 ] || [ "$dialog_result" = "" ] ; then
+	echo "User cancelled operation" 
+	exit 1
+fi
+
+echo "$dialog_result"
+
+x=1
+while read fieldvalue; do
+	[ $x -eq 1 ] && selectedresolution="$fieldvalue"
+	[ $x -eq 2 ] && selecteddepth="$fieldvalue"
+	[ $x -eq 3 ] && selecteddpi="$fieldvalue"
+	[ $x -eq 4 ] && selectedwm="$fieldvalue"
+	[ $x -eq 5 ] && selectedbrowser="$fieldvalue"
+	[ $x -eq 6 ] && imeselectedcheck="$fieldvalue"
+	[ $x -eq 7 ] && taskbselectedcheck="$fieldvalue"	
+	let x++
+done <<< "$dialog_result" #use this method instead of a pipe (problem with variables)
+
+
+
+################ RESULTS PROCESSING ################
+
+#------------- RESOLUTION --------------
+
+if [ "$selectedresolution" != "$resinputvalue" ] || [ "$REMASTER" -a "$selectedresolution" ] ; then
+	changed="$changed resolution"
+	#		Modes       "1024x768" #screen0modes
+	sed -i 's|.*#screen0modes.*|		Modes       "'${selectedresolution}'" #screen0modes|' ${xorgconf}
+	echo "Set RESOLUTION: $selectedresolution"
+fi
+
+#------------- Color Depth --------------
+echo $selecteddepth
+depth=${selecteddepth% *}
+if [ "$depth" != "$depthinputvalue" ] || [ "$REMASTER" -a "$depth" ] ; then
+	sed -i 's|.*#screen0depth.*|		Depth       '${depth}' #screen0depth|' ${xorgconf}
+	changed="$changed color_depth"
+fi
+
+#------------- DPI --------------
+
+if [ "$selecteddpi" != "$dpiinputvalue" ] || [ "$REMASTER" -a "$selecteddpi" ] ; then
+	#Xft.dpi: 96
+	echo "Set DPI: $selecteddpi"
+	sed -i "s/.*Xft.dpi:.*/Xft.dpi: $selecteddpi/" /root/.Xresources
+	changed="$changed dpi"
+fi
+
+#------------- WINDOW MANAGER --------------
+
+if [ "$selectedwm" != "$wminputvalue" ] || [ "$REMASTER" -a "$selectedwm" ] ; then
+	changed="$changed window_manager" #mark as changed
+	#selectedwm=${selectedwm//openbox/openbox-ses} #/bin/openbox-ses (zz script)
+	echo "Set WINDOW MANAGER: $selectedwm"
+	echo "$selectedwm" > /etc/windowmanager
+fi
+
+#------------- BROWSER --------------
+
+if [ "$selectedbrowser" != "$browserinputvalue" ] || [ "$REMASTER" -a "$selectedbrowser" ] ; then
+	#changed="$changed browser" #mark as changed
+	if [ ! "$selectedbrowser" -o "$selectedbrowser" = "(null)" ] ; then
+		echo "* No valid browser, not writing to: /usr/local/bin/defaultbrowser"
+	else
+		plinuxapps -c browser ${selectedbrowser}
+		plinuxapps -c htmlviewer ${selectedbrowser}
+	fi
+fi
+
+
+#------------- IME - Input Method Editor --------------
+
+if [ "$imetype" -a "$imeselectedcheck" != "$imeinputcheck" ]; then
+	changed="$changed $imetype (Input Method Editor)"
+	case $imeselectedcheck in
+		TRUE) 	InstallSCIM ;; #enable
+		FALSE)	RemoveSCIM ;;      #disable
+	esac
+fi
+
+
+#--------- TASKBAR AUTOHIDE --------------
+reloadwm=0 
+if [ "$taskbselectedcheck" != "$taskbinputcheck" ]; then
+	case $WM in
+		jwm)
+			if [ "$taskbselectedcheck" = "TRUE" ] ; then
+				sed -i -e 's|autohide="false"|autohide="true"|' /root/.jwmrc-tray
+				sed -i -e 's|autohide="off"|autohide="on"|' /root/.jwmrc-tray
+			else
+				sed -i -e 's|autohide="true"|autohide="false"|' /root/.jwmrc-tray
+				sed -i -e 's|autohide="on"|autohide="off"|' /root/.jwmrc-tray
+			fi
+			reloadwm=1 ;;
+		icewm)
+			if [ "$taskbselectedcheck" = "TRUE" ] ; then
+				sed -i -e 's|TaskBarAutoHide=0|TaskBarAutoHide=1|' /root/.icewm/preferences
+			else
+				sed -i -e 's|TaskBarAutoHide=1|TaskBarAutoHide=0|' /root/.icewm/preferences
+			fi
+			reloadwm=1 ;;
+	esac
+fi
+
+
+###
+if [ "$NORESTART" ] || [ "$REMASTER" ] ; then
+	exit
+fi
+
+###-- Evaluate & enumerate changes, display confirmation dialog
+if [ "$changed" != "" ]; then
+	msg1="The following options have been modified:\n\n$changed\n\nFor the changes to take effect you mus restart X, do you want to restart now?	"
+	yad --title="Perf" --text="$msg1" --button="Close:10" --button="Restart:0" --image="dialog-info" --center --on-top --fixed --sticky --borders="4"
+	if [ $? -eq 0 ] ; then
+		if pidof lxsession ; then lx-wmrestart ; fi #lxpup
+		restartwm
+		killall -9 $WM
+	fi
+fi
+
+if [ $reloadwm -eq 1 ] ; then
+	case $WM in
+		jwm) jwm -restart ;;
+		icewm) echo  aa ;;
+	esac
+fi
+
+### END ###

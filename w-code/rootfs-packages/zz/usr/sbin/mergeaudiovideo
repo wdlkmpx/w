@@ -1,0 +1,75 @@
+#!/bin/sh
+#w__ 2015
+
+case $1 in
+	-h|-help|--help)
+		echo ; echo "Merge audio from 1st file and video from 2nd"
+		echo ; echo "Syntax:"
+		echo "	${0##*/} [audiofile] [videofile]"
+		echo ; echo "The result will be written to audiofile.videoextension" ; echo
+		exit
+		;;
+esac
+
+###############################################
+
+export debug=1
+export audiofile="$1"
+export videofile="$2"
+export exe
+
+# executable to run
+if which avconv 1>/dev/null 2>&1 ; then
+	exe='avconv'
+else
+	if which ffmpeg 1>/dev/null 2>&1 ; then
+		exe='ffmpeg'
+	else
+		echo "* ERROR: could not find avconv nor ffmpeg"
+		exit 1
+	fi
+fi
+
+############################################################
+
+if [ ! "$audiofile" ] ; then
+	audiofile="$(yad --title="Select SELECT File" --file \
+		--filename="$PWD/*" --width="640" --height="480" \
+		--center --on-top --button="Select AUDIO:0" --button="gtk-cancel:1"
+	)"
+	[ ! "$audiofile" ] && echo "User cancelled operation" && exit 1
+fi
+case $audiofile in
+	/*) echo -n ;;
+	*) audiofile="${PWD}/${audiofile}"
+esac
+
+if [ ! "$videofile" ] ; then
+	videofile="$(yad --title="Select VIDEO File" --file \
+		--filename="$PWD/*" --width="640" --height="480" \
+		--center --on-top --button="Select Video:0" --button="gtk-cancel:1"
+	)"
+	[ ! "$videofile" ] && echo "User cancelled operation" && exit 1
+fi
+case $videofile in
+	/*) echo -n ;;
+	*) videofile="${PWD}/${videofile}"
+esac
+
+export filenoext="${audiofile%.*}"
+export fileext="${videofile##*.}"
+
+#########################################################
+
+function proceed() {
+	$exe -vn -i "$audiofile" -an -i "$videofile" -acodec copy -vcodec copy -shortest \
+		"${filenoext}-out.${fileext}"
+	if [ $debug -eq 1 ] ; then
+		echo ; echo -n "PRESS ENTER TO CONTINUE: " ; read var
+	fi
+}
+export -f proceed
+
+exec xterm -e bash -c proceed
+
+### END ###

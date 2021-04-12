@@ -1,0 +1,53 @@
+#!/bin/sh
+# yad
+
+. ../versions
+. ../../func
+. ../../build.conf
+
+URL=https://github.com/v1cont/yad/archive
+PKG=yad
+VER=$yad_ver
+COMP=tar.gz
+DESC="Yet Another Dialog"
+DEPS=
+CAT=BuildingBlock
+DESKTOP=yad.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+# comment these 2 below if you use a custom package() function
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not
+
+ARCH=$(uname -m)
+case $ARCH in # set in build.conf
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+# main
+retrieve v${VER}.${COMP} ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+
+if [ ! -f ${PKG}-${VER}/configure ] ; then
+	(
+		cd ${PKG}-${VER}
+		sed -i 's/ po / /' Makefile.am
+		autoreconf -ivf && intltoolize
+	)
+fi
+
+EXTRA_CONFIG_OPTS='
+--disable-nls
+--with-gtk=gtk2
+--disable-pfd
+--disable-html
+--disable-spell
+--disable-sourceview
+--disable-icon-browser
+'
+
+build_configure $PKG $VER $LIBDIR
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT

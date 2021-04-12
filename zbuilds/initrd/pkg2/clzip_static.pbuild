@@ -1,0 +1,48 @@
+#!/bin/sh
+# ./build.sh cd's to this dir and execs this script
+
+if [ -f ../func ] ; then
+	. ../func
+elif [ -f ../../func ] ; then
+	. ../../func
+else
+	echo "$0: cannot find ../func"
+	exit
+fi
+
+source_vesions
+
+# ====================================================
+
+SRC=clzip
+PKG=clzip_static
+VER=${clzip_ver}
+URL=https://download-mirror.savannah.gnu.org/releases/lzip/clzip
+COMP=tar.gz
+DESC=""
+DEPS=
+CAT=BuildingBlock
+CWD=`pwd`
+INSTALLED_FILE='usr/bin/lzip'
+
+build() {
+	cd ${SRC}-${VER}
+
+	EXE='clzip'
+	opts='--prefix=/usr'
+	_configure
+	_make ${MKFLG} LDFLAGS=-static
+
+	abort_if_file_not_found ${EXE}
+	_strip ${EXE}
+
+	copy_to_install_dir usr/bin ${EXE} lzip clzip
+}
+
+# main
+retrieve "${SRC}-${VER}.${COMP}"
+[ "$DLD_ONLY" = "yes" ] && exit
+extract ${SRC}-${VER}.${COMP}
+build
+standard_cleanup
+

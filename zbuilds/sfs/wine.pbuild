@@ -1,0 +1,244 @@
+#!/bin/bash
+
+#PORTABLE=1
+
+# /usr/bin/wayland-scanner
+MWD=$PWD
+
+#####################################################################################
+
+scriptdir=${0%/*}
+scriptfile=${0##*/}
+
+DIR=$(realpath ${scriptdir})
+cd "$DIR"
+
+export ROOTDIR="$DIR"
+export BUILDDIR="$DIR/build"
+export SOURCEDIR="$DIR/sources"
+
+mkdir -p "$BUILDDIR"
+mkdir -p "$BUILDDIR/bin"
+mkdir -p "$BUILDDIR/lib"
+mkdir -p "$BUILDDIR/lib/pkgconfig"
+mkdir -p "$BUILDDIR/include"
+mkdir -p "$SOURCEDIR"
+
+####################################################################################
+
+wget='wget -c --no-check-certificate'
+
+export PATH="$BUILDDIR/bin:$PATH"
+export LD_LIBRARY_PATH="${BUILDDIR}/lib:$LD_LIBRARY_PATH"
+export PKG_CONFIG_PATH="${BUILDDIR}/lib/pkgconfig:$PKG_CONFIG_PATH"
+export C_INCLUDE_PATH="${BUILDDIR}/include"
+export CPLUS_INCLUDE_PATH="${BUILDDIR}/include"
+
+function EXECENV() {
+	PATH="$BUILDDIR/bin:$PATH" LD_LIBRARY_PATH="${BUILDDIR}/lib:$LD_LIBRARY_PATH" PKG_CONFIG_PATH="${BUILDDIR}/lib/pkgconfig" \
+		$@
+}
+
+function StandardBuild() {
+	./configure --prefix="$BUILDDIR" --disable-shared --enable-static && make && make install
+}
+
+test_pkg() {
+	if [ ! -f ${1}.md5 ] ; then
+		case $1 in *.tar.*|*.t[gx]z)
+			tar -tf "$1" >/dev/null 2>&1 || return 1
+		esac
+		md5sum ${1} > ${1}.md5
+	fi
+	md5sum -c ${1}.md5
+}
+
+download_pkg() { #full url
+	local url=$1
+	local file=${url##*/}
+	if [ -f "$file" ] ; then
+		if test_pkg "$file" ; then
+			return 0
+		else
+			rm -f "$file"
+		fi
+	fi
+	#--
+	${wget} $url
+	#--
+	if ! test_pkg "$file" ; then
+		rm -f "$file"
+		exit 1
+	fi
+}
+
+extract_pkg() {
+	case $1 in 
+		*.tar.*)
+			rm -rf ${1%.tar.*}
+			tar -xf "$1"
+			;;
+		*.t[gx]z)
+			rm -rf ${1%.t[gx]z}
+			tar -xf "$1"
+			;;
+		*.zip)
+			rm -rf ${1%.zip}
+			unzip -o "$1"
+			;;
+	esac
+}
+
+####################################################################################
+
+#--- IMAGE
+LIBTIFF_VER=4.0.9    #2017-Nov-18
+JPEG_VER=2.0.2       #2019-02-14
+LIBPNG_VER=1.6.37    #2019-04-14
+
+FAUDIO_VER=1907
+SDL2_VER=2.0.10
+
+####################################################################################
+
+if [ "$PORTABLE" ] ; then
+
+	if [ ! -f "$BUILDDIR/lib/libjpeg.a" ] ; then
+		cd ${SOURCEDIR}
+		download_pkg https://sourceforge.net/projects/libjpeg-turbo/files/${JPEG_VER}/libjpeg-turbo-${JPEG_VER}.tar.gz
+		extract_pkg libjpeg-turbo-${JPEG_VER}.tar.gz
+		cd libjpeg-turbo-${JPEG_VER}
+		mkdir build
+		cd build
+		cmake -DCMAKE_INSTALL_PREFIX="$BUILDDIR" ..
+		make && make install
+	fi
+
+	if [ ! -f "$BUILDDIR/lib/libtiff.a" ] ; then #basic lib
+		cd ${SOURCEDIR}
+		download_pkg http://download.osgeo.org/libtiff/tiff-${LIBTIFF_VER}.tar.gz
+		extract_pkg tiff-${LIBTIFF_VER}.tar.gz
+		cd tiff-${LIBTIFF_VER}
+		./configure --prefix="$BUILDDIR" && make && make install
+	fi
+
+	if [ ! -f "$BUILDDIR/lib/libpng.a" ] ; then #basic lib
+		cd ${SOURCEDIR}
+		download_pkg https://sourceforge.net/projects/libpng/files/libpng16/${LIBPNG_VER}/libpng-${LIBPNG_VER}.tar.xz
+		extract_pkg libpng-${LIBPNG_VER}.tar.xz
+		cd libpng-${LIBPNG_VER}
+		./configure --prefix="$BUILDDIR" && make && make install
+	fi
+
+	if [ ! -f "$BUILDDIR/lib/libSDL2.a" ] ; then
+		cd ${SOURCEDIR}
+		download_pkg https://www.libsdl.org/release/SDL2-${SDL2_VER}.tar.gz
+		extract_pkg SDL2-${SDL2_VER}.tar.gz
+		cd SDL2-${SDL2_VER}
+		./configure --prefix="$BUILDDIR" --disable-libudev --disable-dbus --disable-video-wayland \
+			--disable-sse3 #--disable-3dnow  optmize for old processors
+		make && make install
+	fi
+
+	if [ ! -f "$BUILDDIR/lib/libFAudio.so" ] ; then
+		cd ${SOURCEDIR}
+		download_pkg http://fna.flibitijibibo.com/archive/FNA-${FAUDIO_VER}.zip
+		extract_pkg FNA-${FAUDIO_VER}.zip
+		mv FNA FNA-${FAUDIO_VER}
+		(
+			cd FNA-${FAUDIO_VER}/lib/FAudio
+			mkdir build
+			cd build
+			cmake -DCMAKE_INSTALL_PREFIX="$BUILDDIR" ..
+			make && make install
+		)
+	fi
+
+fi
+
+####################################################################################
+
+#exit
+WINE_VER=4.13
+
+cd ${SOURCEDIR}
+download_pkg https://dl.winehq.org/wine/source/4.x/wine-${WINE_VER}.tar.xz
+extract_pkg wine-${WINE_VER}.tar.xz
+cd wine-${WINE_VER}
+target=$MWD/wine-${WINE_VER}-$(uname -m)
+
+opts='--prefix=/usr --disable-win16 --disable-tests'
+
+#  --without-alsa          do not use the Alsa sound support
+opts+=' --without-capi'    # do not use CAPI (ISDN support)
+#  --without-cms           do not use CMS (color management support)
+opts+=' --without-coreaudio' #do not use the CoreAudio sound support
+opts+=' --without-cups'      #do not use CUPS
+#  --without-curses        do not use (n)curses
+#  --without-dbus          do not use DBus (dynamic device support)
+#  --without-faudio        do not use FAudio (XAudio2 support)
+#  --with-float-abi=abi    specify the ABI (soft|softfp|hard) for ARM platforms
+#  --without-fontconfig    do not use fontconfig
+#  --without-freetype      do not use the FreeType library
+opts+=' --without-gettext' # do not use gettext
+#  --with-gettextpo        use the GetTextPO library to rebuild po files
+opts+=' --without-gphoto'  # do not use gphoto (Digital Camera support)
+#  --without-glu           do not use the GLU library
+#  --without-gnutls        do not use GnuTLS (schannel support)
+#  --without-gsm           do not use libgsm (GSM 06.10 codec support)
+#  --without-gssapi        do not use GSSAPI (Kerberos SSP support)
+#  --without-gstreamer     do not use GStreamer (codecs support)
+opts+=' --without-hal'     # do not use HAL (dynamic device support)
+#  --without-inotify       do not use inotify (filesystem change notifications)
+#opts+=' --without-jpeg'    # do not use JPEG
+#  --without-krb5          do not use krb5 (Kerberos)
+#  --without-ldap          do not use LDAP
+opts+=' --without-mingw'   # do not use the MinGW cross-compiler
+#opts+=' --without-mpg123'  # do not use the mpg123 library
+#  --without-netapi        do not use the Samba NetAPI library
+#  --without-openal        do not use OpenAL
+#  --without-opencl        do not use OpenCL
+#  --without-opengl        do not use OpenGL
+#  --without-osmesa        do not use the OSMesa library
+#  --without-oss           do not use the OSS sound support
+#  --without-pcap          do not use the Packet Capture library
+#opts+=' --without-png'     # do not use PNG
+#  --without-pthread       do not use the pthread library
+opts+=' --without-pulse'   # do not use PulseAudio sound support
+opts+=' --without-sane'    # do not use SANE (scanner support)
+#  --without-sdl           do not use SDL
+#opts+=' --without-tiff'    # do not use TIFF
+#  --without-udev          do not use udev (plug and play support)
+opts+=' --without-v4l2'    # do not use v4l2 (video capture)
+#  --without-vkd3d         do not use vkd3d (Direct3D 12 support)
+#  --without-vulkan        do not use Vulkan
+#  --without-xcomposite    do not use the Xcomposite extension
+#  --without-xcursor       do not use the Xcursor extension
+#  --without-xfixes        do not use Xfixes for clipboard change notifications
+#  --without-xinerama      do not use Xinerama (multi-monitor support)
+#  --without-xinput        do not use the Xinput extension
+#  --without-xinput2       do not use the Xinput 2 extension
+#  --without-xml           do not use XML
+#  --without-xrandr        do not use Xrandr (resolution changes)
+#  --without-xrender       do not use the Xrender extension
+#  --without-xshape        do not use the Xshape extension
+#  --without-xshm          do not use XShm (shared memory extension)
+#  --without-xslt          do not use XSLT
+#  --without-xxf86vm       do not use XFree video mode extension
+#  --without-zlib          do not use Zlib (data compression)
+
+JOBS=$(grep "^processor" /proc/cpuinfo | wc -l)
+[ $JOBS -ge 1 ] && JOBS="-j${JOBS}" || JOBS=""
+
+
+./configure --help > ../wine-${WINE_VER}-help.txt
+echo "./configure $(echo $opts | tr ' ' '\n')" > ../wine-${WINE_VER}-configure.txt
+echo >> ../wine-${WINE_VER}-configure.txt
+EXECENV ./configure $opts >> ../wine-${WINE_VER}-configure.txt
+EXECENV make ${JOBS}
+EXECENV make DESTDIR=${target} install
+
+find ${target} -type f -executable -exec strip --strip-debug '{}' \;
+
+mksquashfs ${target} ${target}.sfs -comp gzip
+

@@ -1,0 +1,24 @@
+#!/bin/sh
+
+usage() {
+	echo "
+syntax:
+
+	${0##*/} <dir> <txt>
+
+searches <txt> with grep and removes it 
+with sed from all the text files in <dir>"
+	exit
+}
+
+[ -z "$1" -o -z "$2" ] && usage
+
+if [ ! -d "$1" ] ; then
+	echo "$1: invalid dir"
+	usage
+fi
+
+dir=$1
+txt=$2
+
+sed -i "/${txt}/d" $(grep -r "$txt" "$dir" | sed 's|:.*||' | sort -u)

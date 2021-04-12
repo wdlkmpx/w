@@ -1,0 +1,15 @@
+#!/bin/sh
+#w__ 2015
+
+# open *.url files
+file="$@"
+
+url=$(grep 'URL=' "$file" | head -1)
+url=${url#URL=}
+echo $url
+
+if [ "$url" ] ; then
+	exec defaultbrowser "$url"
+fi
+
+### END ###

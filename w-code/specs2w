@@ -1,0 +1,26 @@
+#!/bin/sh
+
+while IFS="|" read F1 F2 F3 ETC
+do
+	if [ "$F3" ] ; then
+		COMPAT=1
+		echo "### $F2 ###"
+		for i in ${F3//,/ }
+		do
+			case $F1 in
+				yes)  echo "$i" ;;
+				no)   echo "# $i" ;;
+				*) continue ;;
+			esac
+		done
+	else
+		COMPAT=
+		case $F1 in
+			yes)  echo "$F2     w" ;;
+			no)   echo "# $F2     w" ;;
+			*) continue ;;
+		esac
+	fi
+	echo
+done < $(echo DISTRO_PKGS_SPECS-*) > w.out.txt
+

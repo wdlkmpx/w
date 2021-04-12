@@ -1,0 +1,9 @@
+[Desktop Entry]
+Encoding=UTF-8
+Name=youtubedl Download YT videos
+Icon=youtube.png
+Comment=youtubedl
+Exec=youtubedl
+Terminal=false
+Type=Application
+Categories=X-Internet-browser

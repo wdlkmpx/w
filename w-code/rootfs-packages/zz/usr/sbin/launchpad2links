@@ -1,0 +1,58 @@
+#!/bin/sh
+#w__ 2015
+
+url="$@"
+
+function ProcessHTML() {
+	local filex="$@"
+	cat ${filex} | \
+		grep '.*\.deb' | \
+		sed -e 's/.*href="//' -e 's/">.*//' | \
+		grep -v -E 'powerpc|armel|dbg_|doc_|\.orig\.|\.tar\.gz|\.tar\.xz' > ${filex%.html}-links.txt
+}
+
+if [ -f $url ] ; then
+
+	case $url in
+		*.html)
+			ProcessHTML $url
+			exit
+			;;
+	esac
+
+	echo
+	echo "$url is a file"
+	echo
+	echo "Is this is a text file contaning launchpad links"
+	echo "grabbed by this script, you may proceed"
+	echo
+	echo -n "Press A and then hit enter to continue: "
+	read var
+	case $var in 
+		a|A) 
+			while read link ; do
+				[ ! "$link" ] && continue
+				sdir=""
+				case "$link" in
+					*i386*) sdir=i686 ;;
+					*amd64*) sdir=x86_64 ;;
+				esac
+				(
+					[ "$sdir" != "" ] && { mkdir -p "$sdir" ; cd "$sdir" ; }
+					wget -c --no-check-certificate "$link"
+				)
+			done < $url
+			;;
+		*) echo "Aborted... " ;;
+	esac
+	exit
+	
+fi
+
+#download and process url
+
+id=$$
+wget -O launchpad-${$}.html -c --no-check-certificate "$url"
+ProcessHTML launchpad-${$}.html
+
+### END ###

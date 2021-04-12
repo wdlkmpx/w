@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# param: $1: dir to share
+#    accept anonymous connections
+#
+
+if ! [ "$1" ] ; then
+	echo "Usage: $0 <directory>"
+	exit 1
+fi
+
+if ! [ -d "$1" ] ; then
+	echo "Invalid directory: $1"
+	exit 1
+fi
+
+ftpdir=$1
+
+if [ -L /usr/sbin/ftpd -a -L /usr/bin/tcpsvd ] ; then
+	if pidof tcpsvd >/dev/null ; then
+		echo "Already running: tcpsvd + ftpd"
+		exit
+	fi
+	echo Running "tcpsvd -vE 0.0.0.0 21 ftpd -A $ftpdir"
+	tcpsvd -vE 0.0.0.0 21 ftpd -A "$ftpdir" &
+
+else
+	echo Running "pure-ftpd -bBADHk 90 $cfg"
+	if pidof pure-ftpd >/dev/null ; then
+		echo "Already running: pure-ftpd"
+		exit
+	fi
+	pure-ftpd -bBADHk 90 $cfg
+	ln -snfv $ftpdir /root/ftpd
+	#chmod -R +g+r $ftpdir
+fi
+

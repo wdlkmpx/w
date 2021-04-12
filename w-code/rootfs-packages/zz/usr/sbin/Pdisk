@@ -1,0 +1,1094 @@
+#!/bin/bash
+
+export PROMT_TO_CLOSE_WINDOW=1
+export DEVICE=
+export PARTITION=
+export COMPRESSION=
+export BACKUP_FILE=
+export TARGET_PARTITION=
+export SIZE=
+export OUTPUTDIR=
+
+APPICON="--window-icon=/usr/share/pixmaps/puppy/harddisk.svg"
+CDICON="--window-icon=/usr/share/pixmaps/puppy/cdrom.svg"
+
+##########################################################
+
+optical_startup() {
+	if [ "$DEVICE" ] ; then
+		SELECTIONX=${DEVICE}
+	else
+		SELECTIONS="$(probedisk | grep '|optical|' | cut -f1,3 -d "|" | tr " " '_' )"
+		SELECTIONX="$(echo "$SELECTIONS" | tr '|' " " | tr "\n" " ")"
+		SELECTIONX=${SELECTIONX# } #zzz
+		SELECTIONX=${SELECTIONX# } #zzz	
+	fi
+	if [ -z "$SELECTIONS" ] ; then
+		yad --center --title="cdmaster error" --text="  Sorry, no CD/DVD/BD drive detected  " --image=dialog-error --button=gtk-ok:0 ${CDICON}
+		exit 1
+	fi
+
+	drivecount=$(echo "$SELECTIONS" | wc -l)
+	if [ $drivecount -eq 1 ] ; then
+		DEVICE=${SELECTIONX/ *}
+	else
+		res=$(yad --title="Chooose device" --no-buttons ${CDICON} \
+			--width=350 --height=180 --center --separator="\n" --list --radio-list \
+			--column="drive" --column="description" ${SELECTIONX} ${CDICON}
+		)
+		[ ! "$res" ] && echo "User cancelled operation" && exit 1
+		read -r DEVICE <<< "$res"
+	fi
+	echo "DEVICE: $DEVICE"
+
+	mediainfo="$(cdrecord -prcap dev=${DEVICE} 2>/dev/null)"
+	DISCINDRIVE=$(echo "$mediainfo"| grep 'Current:')
+	DISCINDRIVE=${DISCINDRIVE#Current: }
+	DISCINDRIVE=${DISCINDRIVE%% *}
+	echo "DISCINDRIVE=${DISCINDRIVE}"
+	case $DISCINDRIVE in none)
+		yad --center --title="Error" --text="  No disc in ${DEVICE}. Please insert one  " --image=dialog-error --button=gtk-ok:0 ${CDICON}
+		exit 1 ;;
+	esac
+}
+
+
+##########################################################
+
+function validate_drive() {
+	[ -z "$1" ] && return 1
+	mount -v | grep "^${1}" | grep '/initrd/' && {
+		yad --title="err" --text="	$1 is a system drive	" --center --image=dialog-error --button=gtk-ok ${APPICON}
+		return 1
+	}
+	return 0
+}
+
+function xmount() {
+	local partition=${1##*/}
+	[ "$(cat /proc/mounts | grep "^/dev/${partition} ")" ] && return
+	mkdir -p /mnt/${partition}
+	mount /dev/${partition} /mnt/${partition}
+	return $?
+}
+
+function unmount() {
+	local PARTITION=/mnt/$1
+	if grep -q "${PARTITION}" /proc/mounts ; then
+		umount ${PARTITION}	
+		if [ $? -ne 0 ] ; then
+			msgx="Could not unmount $PARTITION \n\n It looks like the device is in use \n\n For a clean operation, the device must be unmounted and not in use \n\n It is advised to boot in RAM mode from USB/CD to perform this task"
+			exec yad --title="unmount $PARTITION" --text="$msgx" --center --image=dialog-error --button=gtk-ok ${APPICON}
+			return 1
+		fi
+	fi
+}
+
+##########################################################
+
+export DDTITLE="Drives"
+export DDTEXT="Select a drive"
+export DIALOGICON=$APPICON
+export WINONLY=
+
+function gui_select_drive() {
+	DRIVES=$(
+		probedisk -hdparm -size -desc -type -hr -extended-usb | grep -v '/dev/sr' | sed -e 's% %_%g' -e 's%|% %g'
+	)
+	part_sel=$(yad --title="$DDTITLE" --text="$DDTEXT" \
+		--width=550 --height=300 --center \
+		--separator="\n" --list --radio-list \
+		--column="drive" --column="size" --column=model --column=type $DRIVES ${DIALOGICON})
+	echo $part_sel
+}
+
+function gui_select_partition() {
+	echo -e "Please wait. Generating partition list..." | yad --text-info \
+		--back="orange" --justify="center" --fontname="Arial Unicode MS 14" \
+		--width=550 --height=450 --sticky --fixed --center --on-top ${DIALOGICON} \
+		--skip-taskbar --undecorated --no-buttons --borders="0" &   # & = backgrounded
+	SPLASH_PID=$!
+	DRIVES=$(
+	probepart -extra-info -no-optical | sed -e 's% %_%g' -e 's%/dev/%%' | \
+		while IFS="|" read -r drive fs size label mount_status
+		do
+			[ "$label" = "" ] && label="-"
+			echo "$drive $fs $size $label $status $mount_status"
+		done
+	)
+	echo "$DRIVES" >&2 #debug
+	kill -9 $SPLASH_PID
+	part_sel=$(yad --title="$DTITLE" --text="$DTEXT" \
+		--width=550 --height=450 --center \
+		--separator="\n" --list --radio-list \
+		--column="drive" --column="fs" --column=size --column=label --column=status $DRIVES ${DIALOGICON})
+	echo $part_sel
+}
+
+##########################################################
+
+function BackupDriveInfo() {
+	#Need a proper drive, not partition. e.g: /dev/sda
+	[ ! "$DEVICE" ] && local DEVICE=$1
+	DEVICE=${DEVICE%[0-9]} #make sure it's not a partition
+	local DEVNAME=${DEVICE#/dev/}
+	# backup partition info with sfdisk
+	echo ; echo "# sfdisk -d ${DEVICE} > "${DEVNAME}.ptab""
+	sfdisk -d ${DEVICE} > "${DEVNAME}.ptab"
+	# backup Master Boot Record
+	#	Some guides show only taking the first 512 bytes (MBR), 
+	#	others show the first 63 blocks (MBR + Bootloader).
+	echo ; echo '#' if=${DEVICE} of="${DEVNAME}.vbr" bs=512 count=63
+	dd if=${DEVICE} of="${DEVNAME}.mbr" bs=512 count=1
+	echo ; echo '#' dd if=${DEVICE} of="${DEVNAME}.mbr" bs=512 count=1
+	dd if=${DEVICE} of="${DEVNAME}.vbr" bs=512 count=63
+	echo -en "\nPRESS ENTER TO CLOSE THIS WINDOW" ; read zzz
+}
+export -f BackupDriveInfo
+
+##########################################################
+
+function check_badblocks() {
+	[ ! "$PARTITION" ] && local PARTITION=$1
+	echo
+	echo '#' badblocks -nsv ${PARTITION}
+	badblocks -nsv ${PARTITION}
+	echo -en "\nPRESS ENTER TO CLOSE THIS WINDOW" ; read zzz	
+}
+export -f check_badblocks
+
+##########################################################
+
+function F3ProcW() {
+	f3write $PARTITION
+	echo -en "\nPRESS ENTER TO CLOSE THIS WINDOW" ; read zzz
+}
+function F3ProcR() {
+	f3read $PARTITION
+	echo -en "\nPRESS ENTER TO CLOSE THIS WINDOW" ; read zzz
+}
+export -f F3ProcW
+export -f F3ProcR
+
+
+##########################################################
+#					COMMAND LINE
+##########################################################
+
+ACTION=$1
+
+##########################################################
+#					MAIN PROGRAM
+##########################################################
+
+case $ACTION in
+
+  # drive
+  gparted|gsmartcontrol|testdisk|backup_drive|restore_drive) ok=1 ;;
+  clone_drive|check_badblocks|wipe_drive|grub4dos|grub4dosconfig|check_flash) ok=1 ;;
+  # partition
+  backup_partition|restore_partition|change_label|check_fs) ok=1 ;;
+  wipe_partition|swapfile|ntpasswd|uuid) ok=1 ;;
+  # optical
+  cdinfo|cd2iso|cd2isoprot|cdrip|dvdsubs) OPTICAL_STUFF=1 ; DEVICE=$2 ;;
+  checkiso|burniso|pburn|isomaster) ZZ=1 ;;
+  # gui
+  *)
+	case $1 in
+		BackupDriveInfo)      shift ; BackupDriveInfo $1 ; exit ;;
+		BackupPartitionData)  shift ; BackupPartitionData $1 $2 ; exit ;;
+		RestorePartitionData) shift ; RestorePartitionData "$1" $2 ; exit ;;
+	esac
+
+	if [ -f "$1" ] ; then
+		case $1 in *.img|*.img.?z)
+				BACKUP_FILE="$1"
+				ACTION=restore_partition ;;
+			*)
+				msgx="File extension must be img img.gz  img.xz\n"
+				exec yad --title="RestorePartitionData" --text="$msgx" --center --image=dialog-error --button=gtk-ok ${APPICON}
+		esac
+	fi
+	#--------------------
+	[ "`whoami`" != "root" ] && exec sudo -A ${0} ${@}
+	LANG=C #faster parsing, but invoke only in English locale
+	GTKDIALOG=gtkdialog
+	echo 'style "specialmono"
+{
+  font_name="Mono "11"
+}
+widget "*mono" style "specialmono"
+class "GtkText*" style "specialmono"' > /tmp/gtkrc_mono
+	export GTK2_RC_FILES=/tmp/gtkrc_mono:/root/.gtkrc-2.0 
+	# set height of display window
+	VERT_RES="`xdpyinfo | grep -E dimensions | cut -d " " -f7 | cut -d "x" -f2`" # vertical screen resolution
+	if [ `which xdpyinfo` ]; then
+		if [ "$VERT_RES" -lt "600" ]; then # set reduced-height display window
+			HEIGHT="268"
+		else # set standard-height display window
+			HEIGHT="412"
+		fi
+	elif [ ! `which xdpyinfo` ]; then
+		HEIGHT="412"
+	fi
+	#------------
+	GSMARTCONTROL=
+	if [ "`which gsmartcontrol 2>/dev/null`" ]; then
+		GSMARTCONTROL='
+		<separator></separator>
+			<menuitem tooltip-text="View drive (SMART) info with GSmartControl" stock="gtk-harddisk" label="Gsmartcontrol">
+			<action>Pdisk gsmartcontrol</action>
+		</menuitem>'
+	fi
+
+	# main dialog
+	export PDISK_DIALOG='
+<window title="Pdisk" icon-name="gtk-harddisk" resizable="true" window-position="1">
+<vbox>
+ <menubar>
+	<menu use-underline="true">
+		'$GSMARTCONTROL'
+		<menuitem tooltip-text="Create/Edit partitions with GParted" stock="gtk-harddisk" label="Gparted">
+			<action>Pdisk gparted</action>
+		</menuitem>
+		<separator></separator>
+		<menuitem tooltip-text="Recover partitions/data with TestDisk" label="Testdisk">
+			<action>Pdisk testdisk</action>
+		</menuitem>
+		<separator></separator>
+		<menuitem label="Back up drive to file">
+			<action>Pdisk backup_drive</action>
+		</menuitem>
+		<menuitem label="Restore drive from backup (file)">
+			<action>Pdisk restore_drive</action>
+		</menuitem>
+		<separator></separator>
+		<menuitem stock="gtk-copy" label="Clone Drive to another drive">
+			<action>Pdisk clone_drive</action>
+		</menuitem>
+		<separator></separator>
+		<menuitem label="Check hard disk with badblocks">
+			<action>Pdisk check_badblocks</action>
+		</menuitem>
+		<menuitem label="Wipe drive securely">
+			<action>Pdisk wipe_drive</action>
+		</menuitem>
+		<menuitem label="Install wee.mbr to drive (grub4dos)">
+			<action>Pdisk grub4dos</action>
+		</menuitem>
+		<separator></separator>
+		<menuitem label="Check flash media [USB/SD] health with F3">
+			<action>Pdisk check_flash</action>
+		</menuitem>
+		<label>'$(gettext '_Drive')'</label>
+	</menu>
+
+	<menu use-underline="true">
+		<menuitem label="Back up partition to file">
+			<action>Pdisk backup_partition</action>
+		</menuitem>
+		<menuitem label="Restore partition from backup (file)">
+			<action>Pdisk restore_partition</action>
+		</menuitem>
+		<separator></separator>
+		<menuitem label="Change partition label">
+			<action>Pdisk change_label</action>
+		</menuitem>
+		<menuitem label="Check partition filesystem">
+			<action>Pdisk check_fs</action>
+		</menuitem>
+		<menuitem label="Wipe partition securely">
+			<action>Pdisk wipe_partition</action>
+		</menuitem>
+		<separator></separator>
+		<menuitem label="Create swap file in partition">
+			<action>Pdisk swapfile</action>
+		</menuitem>
+		<separator></separator>
+		<menuitem label="Reset Windows Password NT/XP/7/8">
+			<action>Pdisk ntpasswd</action>
+		</menuitem>
+		<separator></separator>
+		<menuitem label="Get partitions UUID with blkid">
+			<action>Pdisk uuid</action>
+		</menuitem>
+		<label>'$(gettext '_Partition')'</label>
+	</menu>
+
+	<menu use-underline="true">
+		<menuitem label="Information from optical drive(s)">
+			<action>Pdisk cdinfo</action>
+		</menuitem>
+		<menuitem label="Create ISO from CD/DVD/BD with ddrescue">
+			<action>Pdisk cd2iso</action>
+		</menuitem>
+		<menuitem label="Create ISO from protected DVD (no error check)">
+			<action>Pdisk cd2isoprot</action>
+		</menuitem>
+		<separator></separator>
+		<menuitem label="CD-Audio: Rip CD-audio (flac+cue)">
+			<action>Pdisk cdrip</action>
+		</menuitem>
+		<separator></separator>
+		<menuitem label="Video DVD: Rip subtitles with mencoder/mplayer">
+			<action>Pdisk dvdsubs</action>
+		</menuitem>
+		<separator></separator>
+		<menuitem label="Burn ISO image to CD/DVD/BD disc">
+			<action>Pdisk burniso</action>
+		</menuitem>
+		<menuitem label="Burn ISO image to CD/DVD/BD with pBurn (heavy)">
+			<action>Pdisk pburn</action>
+		</menuitem>
+		<menuitem label="Edit ISO 9660 image with ISO Master">
+			<action>Pdisk isomaster</action>
+		</menuitem>
+
+		<label>'$(gettext '_Optical')'</label>
+	</menu>
+
+ </menubar>
+ 
+	<frame '$(gettext 'Information')'>
+		<edit name="mono" editable="false">
+			<variable>INFO</variable>
+			<input file>/tmp/pup-sysinfo.txt</input>
+			<height>"'$HEIGHT'"</height>
+			<width>760</width>
+		</edit>
+	</frame>
+
+</vbox> 
+<action signal="hide">exit:Exit</action>
+</window>'
+	echo "$PDISK_DIALOG" > /tmp/psi.xml
+	$GTKDIALOG -p PDISK_DIALOG > /dev/null 2>&1 </dev/null
+	exit
+	res=$(yad --title="Pdisk" --text="Action to perform on partition/drive:" \
+	--width=400 --height=450 --center \
+	--separator="\n" --list --radio-list --no-headers --hide-column=1 \
+	--column="" --column="" $APPICON \
+	"gparted"           "Drive: Create/Edit partitions with GParted" \
+	"gsmartcontrol"     "Drive: View drive info with GSmartControl" \
+	"testdisk"          "Drive: Recover partitions/data with TestDisk" \
+	"backup_drive"      "Drive: Back up drive to file" \
+	"restore_drive"     "Drive: Restore drive from backup (file)" \
+	"clone_drive"       "Drive: Clone Drive to another drive" \
+	"check_badblocks"   "Drive: Check hard disk with badblocks" \
+	"wipe_drive"        "Drive: Wipe drive securely" \
+	"grub4dos"          "Drive: Install wee.mbr to drive (grub4dos)" \
+	"grub4dosconfig"    "Drive: grub4dos bootloader config" \
+	"backup_partition"  "Partition: Back up partition to file file" \
+	"restore_partition" "Partition: Restore partition from backup (file)" \
+	"change_label"      "Partition: Change partition label" \
+	"check_fs"          "Partition: Check partition filesystem" \
+	"check_flash"       "Partition: Check flash media [USB/SD] health with F3" \
+	"wipe_partition"    "Partition: Wipe partition securely" \
+	"swapfile"          "Partition: Create swap file in partition" \
+	"ntpasswd"          "Partition: Reset Windows Password NT/XP/7/8" \
+	"uuid"              "ALL: Get partitions UUID with blkid" \
+	"cdinfo"            "Optical: Information from optical drive(s)" \
+	"cd2iso"            "Optical: Create ISO from CD/DVD/BD with ddrescue" \
+	"cd2isoprot"        "Optical: Create ISO from protected DVD (no error check)" \
+	"cdrip"             "Optical CD-Audio: Rip CD-audio (flac+cue)" \
+	"dvdsubs"           "Optical Video DVD: Rip subtitles with mencoder/mplayer" \
+	"burniso"           "ISO: Burn ISO image to CD/DVD/BD disc" \
+	"pburn"             "ISO: Burn ISO image to CD/DVD/BD with pBurn (heavy)" \
+	"isomaster"         "ISO: Edit ISO 9660 image with ISO Master"
+	)  
+	[ $? -ne 0 ] || [ ! "$res" ] && echo "User cancelled operation" && exit 1
+	echo $res
+	read -r ACTION <<< "$res"
+	;;
+esac
+echo "ACTION: ${ACTION}"
+
+case $ACTION in
+
+  burniso)	exec burniso ;;
+  pburn) 	exec pburn ;;
+  isomaster) exec isomaster ;;
+
+  ##########################################################
+  #			A proper way to start GParted
+  ##########################################################
+
+  gparted)
+	which gparted || exec yad --center --title="Error" --text="  Please install Gparted... " --image=dialog-error --button=gtk-ok:0
+	DDTITLE="Gparted" DDTEXT="Select a drive to edit"
+	sel_drive=$(gui_select_drive)
+	[ ! "$sel_drive" ] && echo 'User cancelled operation' && exit 1
+	read -r DRIVE size model type <<< "$sel_drive"
+	exec gparted ${DRIVE}
+	echo change > /sys/block/${sel_drive}/uevent
+	;;
+
+  ##########################################################
+  #			A proper way to start GSmartControl
+  ##########################################################
+  gsmartcontrol) # * It looks like gsmartcontrol scans even wrong devices
+	# * so we have to add the correct devices manually  
+	which gsmartcontrol || exec yad --center --title="Error" --text="  Please install GSmartControl... " --image=dialog-error --button=gtk-ok:0
+	devices=$(probedisk -show-usbflash | grep drive | cut -f 1 -d '|' | xargs -n 1 echo "--add-device")
+	exec gsmartcontrol --no-scan ${devices}
+	exit
+	;;
+
+  ##########################################################
+  #			testdisk
+  ##########################################################
+  testdisk)
+	which testdisk || exec yad --center --title="Error" --text=" Please install TestDisk...  " --image=dialog-error --button=gtk-ok:0
+	defaultterminal -e testdisk
+	exit
+	;;
+
+  ##########################################################
+  #			Backup Partition to File
+  ##########################################################
+  
+  backup_partition)
+
+	DIALOGICON=$APPICON
+	DTITLE=" -- Partition Backup -- "
+	DTEXT="The selected partition will be unmounted (if mounted), so make sure it's not in use."
+	part_sel=$(gui_select_partition)
+	[ ! "$part_sel" ] && echo 'User cancelled operation' && exit 1
+	echo "part_sel: $part_sel"
+	read -r PART_NAME fs size label status <<< "$part_sel"
+	echo "PART_NAME: $PART_NAME"
+	PARTITION=/dev/${PART_NAME}
+	echo "PARTITION=$PARTITION"
+
+	unmount ${PART_NAME}
+	[ $? -ne 0 ] && exit 1
+
+	compcombo='gz!bz2!xz!none'
+	msgx="You have selected $PARTITION $fs $size \n
+Make sure there is enough space in the output directoy/partition to save the backup. \n
+If you really want to secure the partition data, you must back up the partition to another drive, specially a external one. \n 
+You can also back up to another partition on the same hard disk (but it's not advised if it's a failing HD), you can copy/move that backup to another drive later..."
+	lbl1="Select a compression method, 'gz' for slow CPUs, 'xz' for fast CPUs. 'none' for no compression"
+	dialog_result=$(yad --title="Back up partition" --text="$msgx" \
+		--center --fixed --borders="4" --buttons-layout="center" \
+		--separator="\n" --form  \
+		--field="Output dir:DIR" "$outputdir" \
+		--field="$lbl1:LBL" "" \
+		--field="Compression:CB" "$compcombo" \
+		--button=gtk-ok:0 --button=gtk-cancel:1 ${APPICON})
+	[ $? -ne 0 ] || [ "$dialog_result" = "" ] && echo "User cancelled operation" && exit 2
+	x=1
+	while read fieldvalue; do
+		[ $x -eq 1 ] && OUTPUTDIR="$fieldvalue"
+		[ $x -eq 3 ] && COMPRESSION="$fieldvalue"
+		let x++
+	done <<< "$dialog_result" #use this method instead of a pipe (problem with variables)
+	echo "OUTPUTDIR: $OUTPUTDIR"
+	echo "COMPRESSION: $COMPRESSION"
+
+	if [[ ${OUTPUTDIR} == /mnt/${PART_NAME}* ]] ; then
+		yad --title="BackupPartitionData" --text="Must not back up /dev/$PART_NAME to /mnt/$PART_NAME/* \n\nIt looks like you want to back up a partition to the same partition !" --center --image=dialog-error --button=gtk-ok ${APPICON}
+		exit 1
+	fi
+
+	export SIZE=.$size
+	cd "$OUTPUTDIR"
+	xterm -title "BackupPartitionData $PARTITION" -e bash -c BackupPartitionData
+	exit
+	;;
+
+  ##########################################################
+  #			Restor Partition from Backup File
+  ##########################################################
+  
+  restore_partition)
+
+	DIALOGICON=$APPICON
+	if [ ! -f "$BACKUP_FILE" ] ; then
+		dir=$PWD
+		BACKUP_FILE=$(yad --title="Select Partition Backup" --file \
+			--filename="$dir/*" --width="640" --height="480" \
+			--center --on-top --button="gtk-ok:0" --button="gtk-cancel:1" $APPICON)
+		[ $? -ne 0 ] && echo 'User cancelled operation' && exit 1
+		case $BACKUP_FILE in *.img|*.img.?z) ok=1 ;;
+			*)
+				msgx="File extension must be img img.gz  img.xz\n"
+				exec yad --title="RestorePartitionData" --text="$msgx" --center --image=dialog-error --button=gtk-ok ${APPICON}
+		esac
+	fi
+	msgx=" \n We're going to restore a partition from: \n\n ${BACKUP_FILE##*/}  \n "
+	yad --title="RestorePartitionData" --text="$msgx" --center --image=dialog-info --button=gtk-ok:0 --button=gtk-cancel:1 ${APPICON}
+	[ $? -ne 0 ] && echo 'User cancelled operation' && exit 1
+	
+	DTITLE="Restore partition from Backup"
+	DTEXT="Select the partition to write the backup to \nPlease be careful, any mistakes and data will be lost "
+	
+	part_sel=$(gui_select_partition)
+	[ ! "$part_sel" ] && echo 'User cancelled operation' && exit 1
+	echo "part_sel: $part_sel"
+	read -r PART_NAME fs size label status <<< "$part_sel"
+	echo "PART_NAME: $PART_NAME"
+	TARGET_PARTITION="/dev/${PART_NAME}"
+
+	msgx=" -- Final Sanity Check -- \n\n This is the backup file: \n - ${BACKUP_FILE##*/} \n\nThis is the target partition: \n - $TARGET_PARTITION $fs $size \n\nMake sure the image contains a partition which size is equal or smaller than the target partition. Otherwise something really bad may happen"
+	yad --title="RestorePartitionData" --text="$msgx" --center --image=dialog-warning --button=gtk-ok:0 --button=gtk-cancel:1 ${APPICON}
+	[ $? -ne 0 ] && echo 'User cancelled operation' && exit 1
+
+	unmount ${PART_NAME}
+	[ $? -ne 0 ] && exit 1
+	
+	xterm -title "Restore $BACKUP_FILE" -e \
+		Pdisk_func restore_partition "$BACKUP_FILE" $TARGET_PARTITION
+	exit  
+	;;
+
+  ##########################################################
+  #				Change Partition Label
+  ##########################################################
+  
+  change_label)
+
+	DTITLE=" -- Change Partition Label -- "
+	DTEXT="Select partition to change label"
+	part_sel=$(gui_select_partition)
+	[ ! "$part_sel" ] && echo 'User cancelled operation' && exit 1
+	read -r PART_NAME fs size label status <<< "$part_sel"
+	PARTITION=/dev/${PART_NAME}
+	msgx="Change label for $PART_NAME $fs $size"
+	newlabel=$(yad --title="Change partition label" --text="$msgx" --center \
+		--entry="" --entry-text="$label" ${APPICON})
+	[ $? -ne 0 ] && echo 'User cancelled operation' && exit 1
+	[ "$newlabel" = "$label" ] && echo "Label hasn't changed" && exit
+	newlabel=${newlabel^^}
+	newlabel=${newlabel// /_}
+	case $fs in
+		ext[2-4]) e2label   $PARTITION $newlabel ;;
+		vfat)     fatlabel  $PARTITION $newlabel ;;
+		ntfs)     ntfslabel $PARTITION $newlabel ;;
+	esac
+	;;
+
+  ##########################################################
+  #			Check Partition Filesystem
+  ##########################################################
+  
+  check_fs)
+
+	DTITLE=" -- Check Partition Filesystem -- "
+	DTEXT="Select partition which filesystem will be checked. \n WARNING: the partition will be unmounted, make sure it's not being used !"
+	part_sel=$(gui_select_partition)
+	[ ! "$part_sel" ] && echo 'User cancelled operation' && exit 1
+	read -r PART_NAME fs size label status <<< "$part_sel"
+	PARTITION=/dev/${PART_NAME}
+	unmount ${PART_NAME} || exit 1
+	msgx=" The 'Complete Check' also scans the surface of the partition, thus it will take a long time in a large disk. "
+	yad --title="Check $PARTITION filesystem" --text="$msgx" --center --button="Quick Check":5 --button="Complete Check":10
+	case $? in
+		5) ok=1 ;;
+		10) export CHKDEEP=1 ;;
+		*) echo "User cancelled operation" ; exit 1 ''
+	esac
+	xterm -title "Check Filesystem $PARTITION" -e Pdisk_func fscheck $PARTITION
+	exit
+	;;
+
+  ##########################################################
+  #			ntpasswd - Reset Windows Password
+  ##########################################################
+  	
+  ntpasswd)
+
+	NTPASSWDICON="--window-icon=/usr/share/pixmaps/puppy/lock.svg"
+	if [ ! "$(which sampasswd 2>/dev/null)" ] ; then
+		exec yad --title="Error" --text=" Cannot find sampasswd in your PATH \n\nDownload and compile from \n\n http://pogostick.net/~pnh/ntpasswd/" --center --image=dialog-error --button=gtk-ok:1 ${NTPASSWDICON}
+	fi
+	SUPPORTED_WIN="Win NT/XP/Vista/7/8/8.1"
+	DIALOGICON=$NTPASSWDICON
+	WINONLY=1
+	DTITLE=" -- Reset Windows Password -- "
+	DTEXT="  Currently supported windows versions:  \n        $SUPPORTED_WIN  \n  Make sure to select the correct partition...  "
+	part_sel=$(gui_select_partition)
+	[ ! "$part_sel" ] && echo 'User cancelled operation' && exit 1
+	read -r PART_NAME fs size label status <<< "$part_sel"
+	PARTITION=/dev/${PART_NAME}
+	
+	xmount ${PART_NAME}
+	if [ $? -ne 0 ] ; then
+		msgz=" \n Cannot mount /dev/$PART_NAME, have to abort... "
+		yad --title="Error" --text="$msgz" --center --image=dialog-warning --button="Force mount:0" --button=gtk-cancel:1
+	fi
+	
+	WINPATH='./*/system32/config'
+	partition="/mnt/$PART_NAME"
+	cd ${partition}
+	echo -e "Searching for $WINPATH in $partition..." | yad --text-info \
+		--back="orange" --justify="center" --fontname="Arial Unicode MS 14" \
+		--width="400" --height="48" --sticky --fixed --center --on-top \
+		--skip-taskbar --undecorated --no-buttons --borders="0" &   # & = backgrounded
+	SPLASH_PID=$!
+	configpath=$(find . -maxdepth 3 -ipath $WINPATH | sed 's/\.\///')
+	kill -9 $SPLASH_PID
+	if [ "$configpath" ] ; then 
+		cd "${partition}/${configpath}"
+		[ -f sam ] && SAM=sam
+		[ -f SAM ] && SAM=SAM
+		rm -fv /tmp/${SAM}
+		cp -fv ${SAM} /tmp/${SAM}
+		sleep 1
+		msgx=" Found windows on ${partition}: \n\n $configpath \n\n Are you 100% sure you want to clear the Windows Admin password(s) in $partition ? \n\nWARNING: remember that this only works in $SUPPORTED_WIN "
+		yad --title="Confirm" --text=" $msgx " \
+			--center --image=dialog-warning --button="NO":1 --button="Yes CLEAR IT":0 ${NTPASSWDICON}
+		[ $? -ne 0 ] && echo "User cancelled operation" && exit 1
+		samp=$(sampasswd -H -r -a /tmp/${SAM})
+		msgx=" $samp \n\n You must see above a 'Reset user :...' message for each Admin account. Otherwise it didn't do anything..."
+		yad --title="Confirm" --text=" $msgx " \
+			--center --image=dialog-info --button=gtk-ok:0 ${NTPASSWDICON}	
+		cp -fv /tmp/${SAM} $PWD/${SAM}
+	else
+		exec yad --title="Error" --text=" No windows in $partition ! " --center --image=dialog-error --button=gtk-ok:0 ${NTPASSWDICON}
+	fi
+	exit
+	;;
+
+  ##########################################################
+  #					Wipe Partition
+  ##########################################################
+  
+  wipe_partition)
+
+	DTITLE=" -- Wipe Filesystem -- "
+	DTEXT="Select partition to wipe. \n WARNING: choosing the wrong partition will cause data LOSSS!"
+	part_sel=$(gui_select_partition)
+	[ ! "$part_sel" ] && echo 'User cancelled operation' && exit 1
+	read -r PART_NAME fs size label status <<< "$part_sel"
+	PARTITION=/dev/${PART_NAME}
+	validate_drive $PARTITION || exit 1
+	unmount ${PART_NAME}
+	[ $? -ne 0 ] && exit 1
+	msgx="	*** WARNING ***	\n\n The purpose of wiping a partition is to make sure data is destroyed or very hard to recover from. \n
+Random data will be written twice to the whole partition and then it will be deleted (making it unallocated space). \n
+It is advised to boot in RAM mode from CD/USB and then run this. \n
+Make sure $PARTITION (${fs} $size $label) is the right partition. Any mistake will have very bad consequences. "
+	yad --title="Wipe Partition: $PARTITION" --text="$msgx" --center --image=dialog-warning --button=gtk-cancel:0 --button="WIPE":10
+	if [ $? -eq 10 ] ; then
+		unmount ${PART_NAME}
+		[ $? -ne 0 ] && exit 1
+		xterm -title "Wipe Partition: $PARTITION" -e Pdisk_func wipe-partition $PARTITION
+	fi
+	exit
+	;;
+
+  ##########################################################
+  #					Wipe Drive
+  ##########################################################
+
+  wipe_drive)
+
+	DDTITLE="Wipe Drive"
+	DDTEXT="Select drive to wipe. \n WARNING: choosing the wrong drive will cause severe data loss!"
+	sel_drive=$(gui_select_drive)
+	[ ! "$sel_drive" ] && echo 'User cancelled operation' && exit 1
+	read -r DRIVE size model type <<< "$sel_drive"
+	msgx="	*** WARNING ***	\n\n The purpose of wiping a DRIVE is to make sure data is destroyed or very hard to recover from. \n
+Random data will be written twice to the whole DRIVE and then it will be deleted (making it unallocated space, ALL partitions will be lost). \n
+It is advised to boot in RAM mode from CD/USB and then run this. \n
+Make sure $DRIVE ($size $model) is the right DRIVE. Any mistake will have very bad consequences. "
+	yad --title="Wipe Drive: $DRIVE" --text="$msgx" --center --image=dialog-warning --button=gtk-cancel:0 --button="WIPE":10
+	if [ $? -eq 10 ] ; then
+		xterm -title "Wipe Drive: $DRIVE" -e Pdisk_func wipe-partition $DRIVE
+	fi	
+	;;
+
+  ##########################################################
+  #					Back up Drive
+  ##########################################################
+
+  backup_drive)
+
+	DDTITLE="Back up drv"
+	DDTEXT="Select drive to clone. This is special useful for USB drives and small drives.."
+	source_drv=$(gui_select_drive)
+	[ ! "$source_drv" ] && echo 'User cancelled operation' && exit 1
+	read -r DRIVE1 size1 model1 type1 <<< "$source_drv"
+	validate_drive $DRIVE1
+	#- target drv
+	DDTEXT="Select partition where to save the drive backup. \n WARNING: make sure there's enough space for uncompressed data.."
+	target_drv=$(gui_select_partition)
+	[ ! "$target_drv" ] && echo 'User cancelled operation' && exit 1
+	read -r PART_NAME fs size2 label status <<< "$target_drv"
+	DRIVE2=${PART_NAME##*/}
+	xmount ${DRIVE2}
+	mp=$(mount -v | grep "^/dev/${DRIVE2} " | cut -f3 -d ' ')
+	[ -z "$mp" ] && exit 1
+	case "$DRIVE2" in "${DRIVE1##*/}"*)
+		yad --title="error" --text="Can't clone to the same drive!" --center --image=dialog-error --button=gtk-ok ${APPICON}
+		exit 1 ;;
+	esac
+	DRIVE2=${mp}/${DRIVE1##*/}.backup.drv
+	msgx="\n If the information below is correct, click on CLONE: \n
+source: $DRIVE1 $size1 $model1 $type1
+target: $DRIVE2 $size2 $model2 $type2 \n"
+	yad --title="Back up $DRIVE1 to $DRIVE2" --text="$msgx" --center --image=dialog-warning --button=gtk-cancel:0 --button="CLONE":10
+	if [ $? -eq 10 ] ; then
+		xterm -title "Backing up $DRIVE1 to $DRIVE2" -e Pdisk_func backup-drive $DRIVE1 $DRIVE2
+	fi
+	;;
+
+  ##########################################################
+  #					Clone Drive
+  ##########################################################
+
+  clone_drive)
+
+	DDTITLE="CLONE DRIVE"
+	DDTEXT="Select drive to clone. \n WARNING: choosing the wrong drive will cause severe data loss!"
+	source_drv=$(gui_select_drive)
+	[ ! "$source_drv" ] && echo 'User cancelled operation' && exit 1
+	read -r DRIVE1 size1 model1 type1 <<< "$source_drv"
+	validate_drive $DRIVE1
+	#- target drv
+	DDTEXT="Select TARGET drive. \n WARNING: choosing the wrong drive will cause severe data loss!"
+	target_drv=$(gui_select_drive)
+	[ ! "$target_drv" ] && echo 'User cancelled operation' && exit 1
+	read -r DRIVE2 size2 model2 type2 <<< "$target_drv"
+	validate_drive $DRIVE2
+	if [ "$DRIVE1" = "$DRIVE2" ] ; then
+		yad --title="error" --text="Can't clone to the same drive!" --center --image=dialog-error --button=gtk-ok ${APPICON}
+		exit 1
+	fi
+	msgx="\n If the information below is correct, click on CLONE: \n
+source: $DRIVE1 $size1 $model1 $type1
+target: $DRIVE2 $size2 $model2 $type2 \n"
+	yad --title="Clone drive $DRIVE1 to $DRIVE2" --text="$msgx" --center --image=dialog-warning --button=gtk-cancel:0 --button="CLONE":10
+	if [ $? -eq 10 ] ; then
+		export DRIVE1 DRIVE2
+		xterm -title "Cloning $DRIVE1 to $DRIVE2" -e Pdisk_func clone-drive $DRIVE1 $DRIVE2
+	fi
+	;;
+
+  ##########################################################
+  #				Restore drive from backup
+  ##########################################################
+
+  restore_drive)
+
+	DIALOGICON=$APPICON
+	if [ ! -f "$BACKUP_FILE" ] ; then
+		dir=$PWD
+		BACKUP_FILE=$(yad --title="Select DRIVE Backup" --file \
+			--filename="$dir/*" --width="640" --height="480" \
+			--center --on-top --button="gtk-ok:0" --button="gtk-cancel:1" $APPICON)
+		[ $? -ne 0 ] && echo 'User cancelled operation' && exit 1
+		case $BACKUP_FILE in *.img|*.img.?z) ok=1 ;;
+			*)
+				msgx="File extension must be img img.gz  img.xz\n"
+				exec yad --title="RestorePartitionData" --text="$msgx" --center --image=dialog-error --button=gtk-ok ${APPICON}
+		esac
+	fi
+	msgx=" \n We're going to restore a DRIVE from: \n\n ${BACKUP_FILE##*/}  \n "
+	yad --title="Restore Drive" --text="$msgx" --center --image=dialog-info --button=gtk-ok:0 --button=gtk-cancel:1 ${APPICON}
+	[ $? -ne 0 ] && echo 'User cancelled operation' && exit 1
+	
+	DTITLE="Restore DRIVE from Backup"
+	DTEXT="Select the DRIVE to write the backup to \nWARNING: make sure to select correct drive, otherwise data will be lost PERMANENTLY! "
+	
+	sel_drive=$(gui_select_drive)
+	[ ! "$sel_drive" ] && echo 'User cancelled operation' && exit 1
+	read -r DRIVE size model type <<< "$sel_drive"
+	export TARGET_DRV=${DRIVE}
+
+	msgx=" -- Final Sanity Check -- \n\n This is the backup file: \n - ${BACKUP_FILE##*/} \n\nThis is the target DRIVE: \n - $sel_drive \n\n Make sure the target DRIVE is not being used by the system! \n\n Make make sure the image size is equal or smaller than the target DRIVE. Otherwise something really bad may happen"
+	yad --title="Restore Drive" --text="$msgx" --center --image=dialog-warning --button=gtk-ok:0 --button=gtk-cancel:1 ${APPICON}
+	[ $? -ne 0 ] && echo 'User cancelled operation' && exit 1
+
+	xterm -title "Restore $BACKUP_FILE" -e Pdisk_func restore-drive "$BACKUP_FILE" $TARGET_DRV
+	exit  
+	;;
+
+  ##########################################################
+  #					Wipe Partition
+  ##########################################################
+  
+  swapfile)
+
+	DTITLE="Create swap"
+	DTEXT="Select partition"
+	part_sel=$(gui_select_partition)
+	[ ! "$part_sel" ] && echo 'User cancelled operation' && exit 1
+	read -r PART_NAME fs size label status <<< "$part_sel"
+	xmount ${PART_NAME}
+	mp=$(mount -v | grep "^/dev/${PART_NAME} " | cut -f3 -d ' ')
+	pupswap set_dir ${mp}
+	exit
+	;;
+
+  ##########################################################
+  #					Check drive with badblocks
+  ##########################################################
+
+  check_badblocks)
+
+	DDTITLE="Check drive with badblocks"
+	DDTEXT="Select drive to check with badblocks. \n WARNING: ...!"
+	sel_drive=$(gui_select_drive)
+	[ ! "$sel_drive" ] && echo 'User cancelled operation' && exit 1
+	read -r DRIVE size model type <<< "$sel_drive"
+	PARTITION=$DRIVE
+	msgx="	*** WARNING ***	\n\n Dot not use it with flash media [USB/SD] \n\n This test is designed for devices with data already on them. A non-destructive read-write test makes a backup of the original content of a sector before testing with a single random pattern and then restoring the content from the backup. This is a single pass test and is useful as a general maintenance test. \n\n It's recommended to boot in RAM mode from CD/USB and run this on a hard disk with no mounted partitions"
+	yad --title="Check badblocks: $DRIVE" --text="$msgx" --center --image=dialog-warning --button=gtk-cancel:0 --button="Check":10
+	if [ $? -eq 10 ] ; then
+		xterm -title "Check with badblocks: $DRIVE" -e bash -c check_badblocks
+	fi
+	exit
+	;;
+
+  ##########################################################
+  #			Check flash media [USB/SD] with F3
+  ##########################################################
+  
+  check_flash)
+
+	USBICON="--window-icon=/usr/share/pixmaps/puppy/flashcard_usb.svg"
+	if [ ! "$(which f3read 2>/dev/null)" -o ! "$(which f3write 2>/dev/null)" ] ; then
+		exec yad --title="Error" --text=" Cannot find f3read and/or f3write in your PATH \n\nDownload and compile from \n\n https://github.com/AltraMayor/f3" --center --image=dialog-error --button=gtk-ok:1 ${USBICON}
+	fi
+	msgx="This tool tests the health of flash media by writing large dummy files to the device, then reading them back. At the end of each step, close the terminal window. The files are deleted when you quit  \n
+It's also useful to detect a USB/SD/microSD with fake size. In order to do that, as this tool works with a mounted partition, you should create a single partition spanning the whole disk  \n
+F3 stands for Fight Flash Fraud, or Fight Fake Flash."
+	yad --title="f3" --text="$msgx" --center --image=/usr/share/pixmaps/puppy/flashcard_usb.svg --button=gtk-ok:0 --button=gtk-cancel:1 ${USBICON}
+	[ $? -ne 0 ] && echo "User cancelled operation" && exit 1
+	DIALOGICON=${USBICON}
+	DTITLE=" -- Test Flash Media Health -- "
+	DTEXT="Select partition of a USB or SD drive."
+	part_sel=$(gui_select_partition)
+	[ ! "$part_sel" ] && echo 'User cancelled operation' && exit 1
+	read -r PART_NAME fs size label status <<< "$part_sel"
+	PARTITION=/mnt/${PART_NAME}
+
+	xmount ${PART_NAME}
+	if [ $? -ne 0 ] ; then
+		msgz=" \n Cannot mount /dev/$PART_NAME, have to abort... "
+		yad --title="Error" --text="$msgz" --center --image=dialog-warning --button="Force mount:0" --button=gtk-cancel:1
+	fi
+	
+	msgx="		*** 1st step: write *** \n\n Click OK to proceed to write data on $PARTITION \n\n Don't unplug USB/SD after that."
+	yad --title="f3write $PARTITION" --text="$msgx" --center --button=gtk-ok:0 --button=gtk-cancel:1 ${USBICON}
+	[ $? -ne 0 ] && echo "User cancelled operation" && rm -f $PARTITION/*.h2w && exit 1
+	xterm -title "f3write $PARTITION" -e bash -c F3ProcW f3write 
+	
+	msgx="		*** 2nd step: read back *** \n\n First make sure the write process was successful and partition hasn't changed. \n\n Click OK to proceed to read $PARTITION"
+	yad --title="f3" --text="$msgx" --center --button=gtk-ok:0 --button=gtk-cancel:1 ${USBICON}
+	[ $? -ne 0 ] && echo "User cancelled operation" && rm -f $PARTITION/*.h2w && exit 1
+	xterm -title "f3read $PARTITION" -e bash -c F3ProcR f3read
+	exit
+	;;
+
+  ##########################################################
+  #			Install Grub4dos
+  ##########################################################
+
+  grub4dos)
+
+	msgx=" This script does not generate a menu.lst based on the system drives, it just installs the grub4dos mbr. \n\n It will place a generic menu.lst (if not already present) \n\n It will overwrite grldr, and menu_phelp.lst ...  "
+	yad --title="Install grub4dos" --text="$msgx" --center --image=dialog-info --button=gtk-ok:0 --button=gtk-cancel:1 ${APPICON}
+	[ $? -ne 0 ] && echo 'User cancelled operation' && exit 1
+
+	DDTITLE="Install grub4dos"
+	DDTEXT="Select a drive to install grub4dos"
+	sel_drive=$(gui_select_drive)
+	[ ! "$sel_drive" ] && echo 'User cancelled operation' && exit 1
+	read -r DRIVE size model type <<< "$sel_drive"
+	DRIVE_NAME=$(basename "$DRIVE")
+	DEVICE=${DRIVE}
+	PART_NAME=${DRIVE_NAME}1
+	PARTITION_TABLE=$(parted ${DEVICE} print | grep "Partition Table" | sed 's|.* ||')
+
+	if probedisk -show-usbflash ${DRIVE_NAME} | grep usbflash ; then
+		ISUSB=1
+		msgz=" You are about to install GRUB4DOS MBR in a USB device ($DEVICE $size). \n\n \n\n Please make sure this is the correct drive, if there is another booloader already present, you might not want to touch it..."
+		yad --title="grub4dos" --text="$msgz" --center --image=dialog-warning --button=gtk-cancel:1 --button="INSTALL:0"
+		[ $? -ne 0 ] && echo "User cancelled operation" && exit 1
+	else
+		msgz=" You are about to install GRUB4DOS MBR in a Hard Drive ($DEVICE $size $model). \n\n Please make sure this is the correct drive, if there is another booloader already present, you might not want to touch it..."
+		yad --title="grub4dos" --text="$msgz" --center --image=dialog-warning --button=gtk-cancel:1 --button="INSTALL:0"
+		[ $? -ne 0 ] && echo "User cancelled operation" && exit 1	
+	fi
+	
+	#case ${PARTITION_TABLE} in
+	#	dos) ok=1 ;;
+	#	*)
+	#esac
+
+	echo -e "GRUB4DOS $(date) \n====================================" >/tmp/grub4dos.log
+	if ! Pdisk_func write-wee-mbr ${DRIVE_NAME} &> /tmp/grub4dos.log ; then
+		yad --title="Error" --text="Error installing grub4dos" --center --image=dialog-warning --button="Force mount:0" --button=gtk-cancel:1
+		geany /tmp/grub4dos.log &
+	fi
+
+	xmount ${PART_NAME}
+	[ ! -d "/mnt/${PART_NAME}" ] && exit
+	
+	[ -f /usr/share/g4dos/grldr ] && cp -fv /usr/share/g4dos/grldr /mnt/${PART_NAME} >>/tmp/grub4dos.log
+	[ -f /usr/share/g4dos/pcd/menu_phelp.lst ] && cp -fv /usr/share/g4dos/pcd/menu_phelp.lst /mnt/${PART_NAME} >>/tmp/grub4dos.log
+	
+	if [ ! -f "/mnt/${PART_NAME}/menu.lst" ] ; then
+		[ "$ISUSB" ] && menulst=/usr/share/g4dos/usb/menu.lst
+		[ ! -f "$menulst" ] && menulst=/usr/share/g4dos/hd/menu.lst
+		[ ! -f "$menulst" ] && menulst=/usr/share/g4dos/pcd/menu.lst
+		[ -f "$menulst" ] && cp -fv "$menulst" /mnt/${PART_NAME}  >>/tmp/grub4dos.log
+	fi
+	geany /tmp/grub4dos.log &
+	exit
+	;;
+	
+  grub4dosconfig)
+	which grub4dosconfig || exec yad --title="Error" --text=" Please install grub4dosconfig" --center --image=dialog-error --button=gtk-ok:1
+	exec grub4dosconfig
+	;;
+
+  uuid)
+	blkid | grep sd[a-z] | tr ' ' '\n' | sed -e 's|^/|\n-- /|' -e 's|:$| --\n===============|' > /tmp/hduuids.txt
+	exec geany /tmp/hduuids.txt
+	;;
+
+  ####################################################
+  #				CHECKISO
+  ####################################################
+  checkiso)
+	shift
+	unset PROMT_TO_CLOSE_WINDOW
+	Pdisk_func checkiso "$@" 2>&1 | yad --title="$@" --width=640 --height=480 --text-info --margins="10" --wrap --back="#ddefed" --button="OK:0" --center ${CDICON}
+	exit
+	;;
+
+  ####################################################
+  #			INFO FROM OPTICAL DRIVE/DISC
+  ####################################################
+
+  cdinfo)
+	optical_startup
+	IFS="|" read XDEV XTYPE XSIZE VOLUMEID XMNTSTATUS ZZ <<< "$(probepart -hr -extra-info $DEVICE)"
+	(
+	echo
+	echo "===================================================="
+	echo "	DEVICE: $SELECTIONX"
+	echo "===================================================="
+	echo "DISC: $DISCINDRIVE"
+	echo "SIZE: $XSIZE"
+	echo "fstype: $XTYPE"
+	file -s $DEVICE
+	echo
+	echo "$mediainfo"
+	echo "===================================================="
+	echo
+	) | yad --title="Optical drive info" \
+	--width=640 --height=480 ${APPICON} \
+	--text-info --margins="10" --wrap --back="#ddefed" \
+	--button="OK:0" --center --window-icon=${CDICON}
+	exit
+	;;
+
+  ##########################################################
+  #			CDRIP
+  ##########################################################
+
+  cdrip)
+	optical_startup
+	if [ -f "$HOME/.config/ripcd.dir" ] ; then
+		read -r savedir < "$HOME/.config/ripcd.dir"
+		[ -d "$savedir" ] && cd "$savedir"
+	fi
+	dialog_result=$(
+	yad --title="Rip CD-audio ('$DEVICE')" \
+	--text="A wav+cue (or flac+cue) will be created, where you can edit the audio.cue file to set proper information..." \
+	--center --fixed --buttons-layout="center" \
+	--separator="\n" --form  --field="Out dir::DIR" "$outputdir"
+	)
+	[ $? -ne 0 -o "$dialog_result" = "" ] && echo "User cancelled operation" && exit 2
+	read -r savedir <<< "$dialog_result"
+	[ -d "$savedir" ] && echo -n "$savedir" > $HOME/.config/ripcd.dir
+	xterm -title "cdda2wav" -e Pdisk_func rip-cdaudio
+	exit
+	;;
+
+  ####################################################
+  #				RIP DVD SUBTITLES
+  ####################################################
+
+  dvdsubs)
+	optical_startup
+	which mplayer || exec yad --title="Rip DVD Subs" --text=" \n Please install mplayer" --center --image=dialog-error --button=gtk-ok
+	which mencoder || exec yad --title="Rip DVD Subs" --text=" \n Please install mencoder" --center --image=dialog-error --button=gtk-ok
+	#-
+	subinfo=$(Pdisk_func get-dvd-subtitle-list $DEVICE)
+	[ -z "$subinfo" ] && exec yad --title="Error" --text="Could not get subtitle info from $DEVICE" --center --image=dialog-error --button=gtk-ok
+	#-
+	subinfocombo=all!$(echo "$subinfo" | tr '\n' '!')
+	subinfocombo=${subinfocombo%!}
+	dialog_result=$(yad --title="Extract DVD subtitles" $VIDEOICON \
+	--center --fixed --borders="4" --buttons-layout="center" \
+	--text="Choose the subtitles you want to extract:" \
+	--separator="\n" --form  \
+	--field="Device :CB" "$DEVICE" \
+	--field="Subtitle :CB" "$subinfocombo" \
+	--field="Out file:" "subtitles" \
+	--field="Out dir:DIR" "${PWD}" \
+	--field="Individual subtitles:CHK" "TRUE" \
+	--button=gtk-ok:0 --button=gtk-cancel:1)
+	[ $? -ne 0 -o -z "$dialog_result" ] && echo "User cancelled operation" && exit 
+	x=1 ; while read fieldvalue; do
+		case $x in
+			1) dev="$fieldvalue"		;;
+			2) SUB="$fieldvalue"		;;
+			3) OUTFILE="$fieldvalue"	;;
+			4) OUTDIR="$fieldvalue"		;;
+			5) INDIVIDUAL="$fieldvalue"	;;
+		esac
+		let x++
+	done <<< "$dialog_result" #use this method instead of a pipe (problem with variables)	
+	cd "$OUTDIR"
+	[ "$SUB" != "all" ] && subinfo="$SUB"
+	echo "$subinfo" > /tmp/subinfo$$
+	xterm -title "Ripping dvd subtitles" -e Pdisk_func rip-dvd-subtitles $dev /tmp/subinfo$$
+	exit
+	;;
+
+  ####################################################
+  #				CD2ISO
+  ####################################################
+
+  cd2iso*)
+	optical_startup
+	IFS="|" read XDEV XTYPE XSIZE VOLUMEID XMNTSTATUS ZZ <<< "$(probepart -hr -extra-info $DEVICE)"
+	export VOLUMEID XDEV XTYPE XSIZE VOLUMEID
+	[ "$XTYPE" = "audiocd" ] && exec yad --title="Error" --text="Can't create ISO from cdaudio.. you must rip it to wav/flac tracks.." --center --image=dialog-error --button=gtk-ok
+	which ddrescue || exec yad --center --title="error" --text="  Need 'ddrescue' utility. Cannot continue  " --image=dialog-error --button=gtk-ok:0 ${CDICON}
+	msga="\n Device to create ISO from:"
+	msgx=" $msga \n\n ${SELECTIONX} \n\n $XDEV $XTYPE $XSIZE $VOLUMEID \n"
+	yad --title="cd2iso" --center --text="$msgx" ${CDICON}
+	[ $? -ne 0 ] && echo "User cancelled operation" && exit 1
+	# https://wiki.osdev.org/Optical_Drive#Readable_Disc_Content
+	export BLOCKSIZE=2048
+	[ -z "$VOLUMEID" ] && VOLUMEID=data
+	## output file
+	OUTFILE=$(yad --title="Specify OUTPUT file" --file --save --width=640 --height=480 ${CDICON} \
+	--button=gtk-ok --button=gtk-cancel --center --filename="${PWD}/${VOLUMEID}.iso")
+	[ $? -ne 0 ] || [ ! "$OUTFILE" ] && echo "User cancelled operation" && exit 1
+	echo "OUTFILE: $OUTFILE"
+	## replace output file?
+	if [ -f "$OUTFILE" ] ; then
+		yad --title="Confirm" --text="File $OUTFILE already exists\n\nDo you want to replace it?" \
+		--image=dialog-warning --center --button=gtk-yes:0 --button=gtk-no:1 ${CDICON}
+		[ $? -ne 0 ] && echo "User cancelled operation" && exit 1
+	fi
+	rm -f "$OUTFILE"
+
+	[ "$ACTION" = 'cd2isoprot' ] && OPTS='-noerror'
+	xterm -title "cd2iso $device" -e Pdisk_func cd2iso $OPTS $DEVICE "$OUTFILE"
+	rm -f "/tmp/${VOLUMEID}.log"
+	exit
+	;;
+
+esac
+
+### END ###

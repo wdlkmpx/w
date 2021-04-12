@@ -1,0 +1,18 @@
+[branch]
+	autosetupmerge = always
+[color]
+	diff = auto
+	grep = auto
+	interactive = auto
+	ui = true
+[http]
+	sslverify = false
+[core]
+	pager = less
+	editor = nano
+[push]
+	default = simple
+[merge]
+	renameLimit = 999999
+[list]
+	renameLimit = 999999
