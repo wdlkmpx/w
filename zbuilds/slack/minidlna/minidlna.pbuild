@@ -1,0 +1,40 @@
+# minidlna
+
+. ../func
+. ../build.conf
+
+URL=http://downloads.sourceforge.net/project/minidlna/minidlna/1.1.4
+PKG=minidlna
+VER=1.1.4
+COMP=tar.gz
+DESC="minidlna is a DLNA media server for your network"
+DEPS=+ffmpeg
+CAT=Multimedia
+DESKTOP=minidlna.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+package() {
+	# SPECIAL extras
+	install -d -m 0755 ${PKG}-install/etc/init.d
+	install -m 0644 minidlna.conf.sample ${PKG}-install/etc
+	install -m 0644 minidlna ${PKG}-install/etc/init.d
+}
+
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+build_configure $PKG $VER $LIBDIR
+package	
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT

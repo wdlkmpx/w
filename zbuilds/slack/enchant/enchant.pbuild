@@ -1,0 +1,32 @@
+# enchant
+
+. ../func
+. ../build.conf
+
+URL=http://www.abisource.com/downloads/enchant/1.6.0
+PKG=enchant
+VER=1.6.0
+COMP=tar.gz
+DESC="a generic interface into various existing spell checking libraries"
+DEPS=+hunspell
+CAT=BuildingBlock
+DESKTOP=enchant.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+build_configure $PKG $VER $LIBDIR
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

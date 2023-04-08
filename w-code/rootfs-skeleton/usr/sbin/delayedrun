@@ -1,0 +1,14 @@
+#!/bin/ash
+#launched from ~/.xinitrc, so X is running.
+
+# see also /etc/sudoers
+[ "`whoami`" != "root" ] && exec sudo -A ${0} ${@}
+
+sleep 2 # let the dust settle first.
+
+if [ -d /root/Startup ];then
+ for A in /root/Startup/* ; do
+  $A 2>/dev/null & 
+  sleep 0.2
+ done
+fi

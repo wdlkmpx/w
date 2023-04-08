@@ -1,0 +1,291 @@
+#!/bin/sh
+#
+
+#set -x
+
+help() {
+    echo "create firefox esr SFS
+usage:
+
+    $0 <68|78|91|102> [arch]
+
+[arch] can be i686 or x86_64 (leave empty to build a unified sfs
+       with both i686 and x86_64 binaries)
+[arch] can also be 'split' to create both i686 and x86_64 binaries
+       in separate sfs files"
+    exit
+}
+
+# ====================================================================
+### https://github.com/gorhill/uBlock/releases
+#          1.46.0 https://github.com/uBlockOrigin/uBlock-issues/discussions/2497#discussioncomment-4996662
+# starting 1.47.0 ubo requires firefox 79+
+UB_VERSION=1.48.0  # requires firefox 79+
+# https://support.mozilla.org/en-US/kb/deploying-firefox-with-extensions
+#   (83.0+ unable to deploy extensions (at some point only ESR deploys addon easily))
+# ====================================================================
+
+# see latest version in:
+### https://www.mozilla.org/en-US/firefox/releases/
+### https://www.mozilla.org/firefox/organizations/notes/
+###       https://ftp.mozilla.org/pub/firefox/releases/
+case $1 in
+    68)  VER=68.12.0esr ; UB_VERSION=1.46.0 ;; # 2020.08.25
+    78)  VER=78.15.0esr ; UB_VERSION=1.46.0 ;; # 2021.10.05
+    91)  VER=91.13.0esr ;;                     # 2022.08.23
+    102) VER=102.9.0esr ;;                     # 2023.02.14
+    *) help;;
+esac
+
+SPLIT=
+ARCHES="i686 x86_64"
+if [ "$2" ] ; then
+    case $2 in
+        32|i686)   ARCHES="i686"   ; SPLIT=1 ;;
+        64|x86_64) ARCHES="x86_64" ; SPLIT=1 ;;
+        all|split) SPLIT=1 ;;
+        *) help ;; #invalid arch
+    esac
+fi
+
+UB_URL=https://github.com/gorhill/uBlock/releases/download/${UB_VERSION}/uBlock0_${UB_VERSION}.firefox.signed.xpi
+
+S_COMP="-comp gzip" #xz gzip lzo lz4
+FIREFOXV=firefox-${VER}
+
+VERSION=$VER
+LANGX='en-US'
+
+OUTPUT_DIR=$(pwd)/output
+mkdir -p $(pwd)/output
+. ./0common_functions.sh
+
+URL_i686="https://ftp.mozilla.org/pub/firefox/releases/${VER}/linux-i686/${LANGX}/firefox-${VER}.tar.bz2"
+URL_x86_64="https://ftp.mozilla.org/pub/firefox/releases/${VER}/linux-x86_64/${LANGX}/firefox-${VER}.tar.bz2"
+
+FIREFOX_i686="firefox-${VER}-i686.tar.bz2"
+FIREFOX_x86_64="firefox-${VER}-x86_64.tar.bz2"
+
+#==============================================================
+
+mkdir -p tmp
+cd tmp
+CWD=$(pwd)
+
+ublock_origin=$(pwd)/${UB_URL##*/} #basename
+common_dl_file ${UB_URL}
+common_dl_file ${URL_i686}   ${FIREFOX_i686}
+common_dl_file ${URL_x86_64} ${FIREFOX_x86_64}
+
+#==============================================================
+
+firefox_script='#!/bin/sh
+
+APULSE=
+if type apulse >/dev/null 2>&1 ; then
+	APULSE="apulse"
+fi
+if type pulseaudio >/dev/null 2>&1 ; then
+	APULSE=
+elif [ -f /usr/bin/pactl ] ; then
+	APULSE=
+fi
+
+#========================================================
+
+case $0 in *portable)
+	LAUNCHDIR="$(dirname "$(readlink -f "$0")")"
+	if ! [ -d "$LAUNCHDIR/profile" ] ; then
+		rm -f "$LAUNCHDIR/profile"
+		mkdir -p "$LAUNCHDIR/profile"
+		chmod 777 "$LAUNCHDIR/profile"
+	fi
+	exec $spot $APULSE "$LAUNCHDIR/firefox" "$@" -profile "$LAUNCHDIR/profile"
+	exit
+	;;
+esac
+
+#========================================================
+
+spot=
+if [ $(id -u) -eq 0 ]; then
+	if [ -f /usr/sbin/run-as-spot ] ; then
+		spot="run-as-spot"
+	fi
+	# pup_volume_monitor_socket must be writable by all.
+	if [ -e /tmp/pup_volume_monitor_socket ] ; then
+		chmod 777 /tmp/pup_volume_monitor_socket
+	fi
+fi
+
+arch=$(uname -m)
+FIREFOXV='${FIREFOXV}'
+if [ -e /opt/${FIREFOXV}/${arch}/firefox ] ; then
+    exec $spot $APULSE /opt/${FIREFOXV}/${arch}/firefox "$@"
+elif [ -e /opt/${FIREFOXV}/firefox ] ; then
+    exec $spot $APULSE /opt/${FIREFOXV}/firefox "$@"
+else
+    echo "firefox not found: /opt/${FIREFOXV}/${arch}/firefox"
+    echo "firefox not found: /opt/${FIREFOXV}/firefox"
+    exit 1
+fi
+'
+
+#======================================================================
+
+for i in ${ARCHES}
+do
+	cd ${CWD}
+
+	case $i in
+		i686)   URL=${URL_i686}   ; FILE=${FIREFOX_i686}   ;;
+		x86_64) URL=${URL_x86_64} ; FILE=${FIREFOX_x86_64} ;;
+	esac
+
+	if [ "$SPLIT" ] ; then
+		PKGDIR=firefox-${VERSION}-${i}-ubo
+		i='' 
+	else
+		PKGDIR=firefox-${VERSION}-i686-x86_64-ubo
+	fi
+
+	mkdir -p ${PKGDIR}/opt/${FIREFOXV}
+	mkdir -p ${PKGDIR}/usr/bin
+	mkdir -p ${PKGDIR}/usr/share/applications
+	mkdir -p ${PKGDIR}/usr/share/pixmaps
+
+	cp -fv ${ublock_origin} ${PKGDIR}/opt/uBlock0@raymondhill.net.xpi
+	echo -n > ${PKGDIR}/opt/${ublock_origin##*/}
+
+	if [ "$SPLIT" ] ; then
+		( cd ${PKGDIR}/opt/${FIREFOXV}
+		tar --strip-components=1 -xf ${CWD}/${FILE} ; )
+	else
+		(
+		rm -rf ${PKGDIR}/opt/${FIREFOXV}/${i}
+		mkdir -p ${PKGDIR}/opt/${FIREFOXV}/${i}
+		cd ${PKGDIR}/opt/${FIREFOXV}/${i}
+		tar --strip-components=1 -xf ${CWD}/${FILE}
+		sync
+		)
+	fi
+
+	#===
+	cp ${PKGDIR}/opt/${FIREFOXV}/${i}/browser/chrome/icons/default/default64.png \
+		${PKGDIR}/usr/share/pixmaps/firefox.png
+	#==
+
+	# disable firefox updates
+	mkdir -p ${PKGDIR}/opt/${FIREFOXV}/${i}/distribution
+	cat >    ${PKGDIR}/opt/${FIREFOXV}/${i}/distribution/policies.json <<EOF
+{
+   "policies": {
+      "DisableAppUpdate": true,
+      "DisableTelemetry": true,
+      "ExtensionSettings": {
+         "uBlock0@raymondhill.net": {
+            "installation_mode": "allowed"
+         }
+      }
+   }
+}
+EOF
+
+	# some better defaults
+	mkdir -p ${PKGDIR}/opt/${FIREFOXV}/${i}/defaults/pref
+	cat >    ${PKGDIR}/opt/${FIREFOXV}/${i}/defaults/pref/autoconfig.js <<EOF
+// Any comment. You must start the file with a single-line comment!
+//pref("general.config.sandbox_enabled", false);
+pref("general.config.filename", "mozilla.cfg");
+pref("general.config.obscure_value", 0);
+EOF
+
+	cat >    ${PKGDIR}/opt/${FIREFOXV}/${i}/mozilla.cfg <<EOF
+// Mozilla User Preferences
+pref("browser.newtabpage.activity-stream.feeds.section.highlights", false);
+pref("browser.newtabpage.activity-stream.feeds.snippets", false);
+pref("browser.newtabpage.activity-stream.feeds.topsites", false);
+pref("browser.newtabpage.activity-stream.prerender", false);
+pref("browser.newtabpage.activity-stream.section.highlights.includeBookmarks", false);
+pref("browser.newtabpage.activity-stream.section.highlights.includeDownloads", false);
+pref("browser.newtabpage.activity-stream.section.highlights.includePocket", false);
+pref("browser.newtabpage.activity-stream.section.highlights.includeVisited", false);
+pref("browser.newtabpage.activity-stream.showSearch", false);
+pref("browser.newtabpage.enabled", false);
+pref("browser.shell.checkDefaultBrowser", false);
+pref("browser.shell.didSkipDefaultBrowserCheckOnFirstRun", true);
+pref("browser.startup.homepage", "about:blank");
+pref("browser.cache.disk.capacity", 51200);
+pref("browser.cache.disk.smart_size.enabled", false);
+pref("browser.startup.page", 0);
+pref("xpinstall.signatures.required", false);
+pref("xpinstall.whitelist.required", false);
+pref("browser.backspace_action", 0);
+EOF
+
+	#------------------
+	echo "$firefox_script" > ${PKGDIR}/usr/bin/${FIREFOXV}
+	chmod +x ${PKGDIR}/usr/bin/${FIREFOXV}
+	ln -sv ${FIREFOXV} ${PKGDIR}/usr/bin/firefox
+	#------------------
+
+	cat > ${PKGDIR}/usr/share/applications/${FIREFOXV}.desktop <<EOF
+[Desktop Entry]
+Encoding=UTF-8
+Name=Firefox $VER
+Comment=Firefox $VER
+Icon=/usr/share/pixmaps/firefox.png
+Exec=${FIREFOXV}
+Terminal=false
+Type=Application
+Categories=WebBrowser
+MimeType=text/html;text/xml;application/xhtml+xml;application/xml;application/rss+xml;application/rdf+xml;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/ftp;x-scheme-handler/chrome;video/webm;application/x-xpinstall;
+GenericName=firefox web browser
+EOF
+
+    echo "$firefox_script" > ${PKGDIR}/opt/${FIREFOXV}/${i}/firefox-portable
+	chmod +x ${PKGDIR}/opt/${FIREFOXV}/${i}/firefox-portable
+
+	addons_dir=${PKGDIR}/opt/${FIREFOXV}/${i}/distribution/extensions
+	mkdir -p ${addons_dir}
+	if [ "$SPLIT" ] ; then
+		ln -sv "../../../uBlock0@raymondhill.net.xpi" ${addons_dir}/uBlock0@raymondhill.net.xpi
+	else
+		ln -sv "../../../../uBlock0@raymondhill.net.xpi" ${addons_dir}/uBlock0@raymondhill.net.xpi
+	fi
+
+	# repackage zip files with 0 compressiones
+	for j in ${PKGDIR}/opt/${FIREFOXV}/${i}/omni.ja \
+	         ${PKGDIR}/opt/${FIREFOXV}/${i}/browser/omni.ja
+	do
+		[ -f $j ] || continue
+	(
+		dir=$(dirname $j)
+		cd $dir
+		mkdir omnidir
+		cd omnidir
+		unzip ../omni.ja
+		sync
+		zip -0 -y -R ../newomni '*'
+		cd ..
+		mv newomni.zip omni.ja
+		rm -r omnidir
+	)
+	done
+
+	if [ "$SPLIT" ] ; then
+		cd ${CWD}
+		common_dir2sfs ${PKGDIR}
+	fi
+
+done
+
+#======================================================================
+
+if [ "$SPLIT" ] ; then
+	exit
+fi
+
+cd ${CWD}
+
+common_dir2sfs ${PKGDIR}

@@ -1,0 +1,37 @@
+# libspectre
+
+. ../func
+. ../build.conf
+
+URL=http://libspectre.freedesktop.org/releases
+PKG=libspectre
+VER=0.2.7
+COMP=tar.gz
+DESC="libspectre is a small library for rendering Postscript documents"
+DEPS=
+CAT=BuildingBlock
+DESKTOP=libspectre.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+patch_me() {
+	patch -p0 --verbose < gostscript.patch
+}
+
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+patch_me
+build_configure $PKG $VER $LIBDIR
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

@@ -1,0 +1,32 @@
+# libexif-gtk
+
+. ../func
+. ../build.conf
+
+URL=http://downloads.sourceforge.net/project/libexif/libexif-gtk/0.4.0
+PKG=libexif-gtk
+VER=0.4.0
+COMP=tar.bz2
+DESC="EXIF Tag Parsing Library"
+DEPS=+cairo
+CAT=BuildingBlock
+DESKTOP=libexif-gtk.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+build_configure $PKG $VER $LIBDIR
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

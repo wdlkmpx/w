@@ -1,0 +1,15 @@
+#One or more words that identify this distribution:
+DISTRO_NAME='Slacko64 PLinux'
+#version number of this distribution:
+DISTRO_VERSION=15.0
+#The distro whose binary packages were used to build this distribution:
+DISTRO_BINARY_COMPAT='slackware64'
+#Prefix for some filenames: exs: slackware64save.2fs, slackware64-6.9.9.9.sfs
+DISTRO_FILE_PREFIX='slackware64'
+#The version of the distro whose binary packages were used to build this distro:
+DISTRO_COMPAT_VERSION='15.0'
+#the kernel pet package used:
+DISTRO_KERNEL_PET='Huge_Kernel'
+DISTRO_TARGETARCH='x86_64'
+DISTRO_XORG_AUTO='yes'
+DISTRO_DB_SUBNAME='slackware6415.0'

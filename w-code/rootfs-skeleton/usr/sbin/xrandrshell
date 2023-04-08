@@ -1,0 +1,20 @@
+#!/bin/ash
+
+if [ -f /etc/xrandrindex ] ; then
+	rm -f /etc/xrandrindex # legacy file
+fi
+
+if [ "$1" = "start" ] ; then
+	if [ -f $HOME/.config/autostart/lxrandr-autostart.desktop ] ; then
+		rm -rf $HOME/.zarfy
+		cmd=$(grep Exec $HOME/.config/autostart/lxrandr-autostart.desktop | cut -f 2 -d "'")
+		eval $cmd
+	fi
+	exit
+fi
+
+if which lxrandr &>/dev/null ; then
+	exec lxrandr "$@"
+else
+	exec /usr/lib/gtkdialog/box_ok xrandrshell error "Please install lxrandr..."
+fi

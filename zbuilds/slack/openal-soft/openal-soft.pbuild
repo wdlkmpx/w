@@ -1,0 +1,45 @@
+# openal-soft
+
+. ../func
+. ../build.conf
+
+URL=http://kcat.strangesoft.net/openal-releases
+PKG=openal-soft
+VER=1.16.0
+COMP=tar.bz2
+DESC="software implementation of the OpenAL 3D audio API"
+DEPS=
+CAT=BuildingBlock
+DESKTOP=openal-soft.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+build() {
+	cd ${PKG}-${VER}/build
+	cmake \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DCMAKE_VERBOSE_MAKEFILE:BOOL="on" \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DLIB_SUFFIX=${LIBDIRSUFFIX} .. #note the dots!
+	make $MKFLG
+	[ "$?" -eq 0 ] || exit
+	make DESTDIR=$CWD/${PKG}-install install
+	cd -
+}
+	
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

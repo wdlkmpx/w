@@ -1,0 +1,274 @@
+#!/bin/bash
+#BK nov. 2011
+
+W_VERSION=9
+
+if [ "`whoami`" != "root" ] ; then
+	echo "Must be root"
+	exit 1
+fi
+
+[ -d ./w-code ] || [ -d ./w-distro ] || exit
+
+if [ "$1" != "" ]; then
+	if [ -f ${1}/DISTRO_SPECS ]; then
+		COMPATVERSION_DIR=${1%/}
+		. ${COMPATVERSION_DIR}/DISTRO_SPECS
+		TARGETARCH=${DISTRO_TARGETARCH}
+		COMPATDISTRO=${DISTRO_BINARY_COMPAT}
+		COMPATVERSION=${DISTRO_COMPAT_VERSION}
+		ALTERNATE_BUILD=$COMPATVERSION_DIR
+	fi
+fi
+
+echo
+echo 'This script merges w-arch, w-code
+w-distro and initrd-progs to ../wdistro-out/*.
+See README
+'
+# autodetect HOSTARCH - how hard can it be?
+case `uname -m` in
+	i?86)HOSTARCH=x86 ;;
+	x86_64|amd64)HOSTARCH=x86_64 ;;
+	arm*)HOSTARCH=arm ;;
+	*) echo "Error detecting host architecture, exiting..." ; exit 1 ;;
+esac
+echo "-----------------"
+echo "Host arch: $HOSTARCH     (The host is the machine you are running W on)"
+echo "-----------------"
+echo
+echo "Please choose the target architecture.. (the target
+is the machine in which the PLinux that you build is going to run):"
+while [ "$TARGETARCH" = "" ] ; do
+	echo
+	CNT=1
+	for ONEARCH in `find w-distro -mindepth 1 -maxdepth 1 -type d | sed -e 's%^w-distro/%%' | sort | tr '\n' ' '`
+	do
+		echo "$CNT  $ONEARCH"
+		CNT=$(($CNT + 1))
+	done
+	echo -n 'Type number of target architecture: '
+	read nTARGETARCH
+	TARGETARCH="`find w-distro -mindepth 1 -maxdepth 1 -type d | sed -e 's%^w-distro/%%' | sort | head -n $nTARGETARCH 2>/dev/null | tail -n 1`"
+done
+echo "...ok, $TARGETARCH"
+echo
+
+echo 'W builds a PLinux based on the binary packages from another distro.
+We sometimes refer to this as the "compat-distro".'
+while [ "$COMPATDISTRO" = "" ] ; do
+	echo
+	CNT=1
+	taPTN="s%^w-distro/${TARGETARCH}/%%"
+	for ONEDISTRO in `find w-distro/${TARGETARCH} -mindepth 1 -maxdepth 1 -type d | sed -e "${taPTN}" | sort | tr '\n' ' '`
+	do
+		echo "$CNT  $ONEDISTRO"
+		CNT=$(($CNT + 1))
+	done
+	echo -n 'Type number of compat-distro: '
+	read nCOMPATDISTRO
+	COMPATDISTRO="`find w-distro/${TARGETARCH} -mindepth 1 -maxdepth 1 -type d | sed -e "${taPTN}" | sort | head -n $nCOMPATDISTRO 2>/dev/null | tail -n 1`"
+done
+echo "...ok, $COMPATDISTRO"
+echo
+
+echo 'The compat-distro usually has release versions
+Choose which release you want to obtain the binary packages from.'
+while [ "$COMPATVERSION" = "" ] ; do
+	echo
+	CNT=1
+	for ONECOMPAT in `find w-distro/${TARGETARCH}/${COMPATDISTRO} -maxdepth 1 -mindepth 1 -type d | rev | cut -f 1 -d '/' | rev | sort | tr '\n' ' '`
+	do
+		echo "$CNT  $ONECOMPAT"
+		CNT=$(($CNT + 1))
+	done
+	if [ $CNT -eq 1 ];then
+		echo -e "\nSorry, there are no release directories inside w-distro/${COMPATDISTRO}."
+		exit
+	fi
+	if [ $CNT -eq 2 ];then
+		COMPATVERSION="`find w-distro/${TARGETARCH}/${COMPATDISTRO} -maxdepth 1 -mindepth 1 -type d | rev | cut -f 1 -d '/' | rev | sort | head -n 1 2>/dev/null | tail -n 1`"
+		continue
+	fi
+	echo -n 'Type number of release: '
+	read nCOMPATVERSION
+	COMPATVERSION="`find w-distro/${TARGETARCH}/${COMPATDISTRO} -maxdepth 1 -mindepth 1 -type d | rev | cut -f 1 -d '/' | rev | sort | head -n $nCOMPATVERSION 2>/dev/null | tail -n 1`"
+done
+echo "...ok, $COMPATVERSION"
+echo
+
+echo 'Choices:'
+echo "Host architecture:     $HOSTARCH"
+echo "Target architecture:   $TARGETARCH"
+echo "Compatible-distro:     $COMPATDISTRO"
+echo "Compat-distro version: $COMPATVERSION"
+echo
+echo -n "If these are ok, press ENTER, other CTRL-C to quit: "
+read waitforit
+
+#-------
+if [ "$COMPATVERSION_DIR" = "" ]; then
+	COMPATVERSION_DIR=w-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}
+	W_OUT=../wdistro-out/${HOSTARCH}_${TARGETARCH}_${COMPATDISTRO}_${COMPATVERSION}
+else
+	W_OUT=../wdistro-out/${HOSTARCH}_${TARGETARCH}_${COMPATDISTRO}_${COMPATVERSION_DIR##*/}
+fi
+#-------
+
+mkdir -p ${W_OUT}
+echo "Choices:
+Host architecture:     $HOSTARCH
+Target architecture:   $TARGETARCH
+Compatible-distro:     $COMPATDISTRO
+Compat-distro version: $COMPATVERSION
+"  > ${W_OUT}/merge2out.log
+
+echo
+echo "Directory '${W_OUT}'
+has been created, if it didn't exist, and the contents of 'w-code' will
+be copied into it. Then, these will also be copied into it:
+w-arch/${HOSTARCH}/build
+w-arch/${TARGETARCH}/target
+w-distro/${TARGETARCH}/${COMPATDISTRO}  (files all levels)
+${COMPATVERSION_DIR}"
+echo
+echo "Any existing files in '${W_OUT}' will be over-ridden."
+echo "(Also, all files in folders 'boot', 'packages-templates',
+ 'rootfs-skeleton', 'rootfs-packages', 'support',
+ 'and 'initrd-progs' will be deleted.)"
+echo
+echo -n 'Press ENTER to continue: '
+read goforit
+
+sdirs='boot initrd-progs packages-templates rootfs-packages rootfs-skeleton support'
+
+# as files/dirs could be removed in future Ws, need to wipe entire target dirs first...
+for d in $sdirs
+do
+	if [ -d ${W_OUT}/${d} ] ; then
+		echo "Deleting ${W_OUT}/${d}" | tee -a ${W_OUT}/merge2out.log
+		rm -rf ${W_OUT}/${d} 2> /dev/null
+	fi
+done
+sync
+
+echo | tee -a ${W_OUT}/merge2out.log
+echo "Copying w-code/*..." | tee -a ${W_OUT}/merge2out.log
+cp -a -f --remove-destination w-code/* ${W_OUT}/ 2>&1 | tee -a ${W_OUT}/merge2out.log
+sync
+echo "Copying w-arch/${HOSTARCH}/build/*..." | tee -a ${W_OUT}/merge2out.log
+cp -a -f --remove-destination w-arch/${HOSTARCH}/build/* ${W_OUT}/ 2>&1 | tee -a ${W_OUT}/merge2out.log
+sync
+echo "Copying w-arch/${TARGETARCH}/target/*" | tee -a ${W_OUT}/merge2out.log
+cp -a -f --remove-destination w-arch/${TARGETARCH}/target/* ${W_OUT}/ 2>&1 | tee -a ${W_OUT}/merge2out.log
+sync
+echo "Copying initrd-progs..." | tee -a ${W_OUT}/merge2out.log
+cp -a -f --remove-destination initrd-progs ${W_OUT}/ 2>&1 | tee -a ${W_OUT}/merge2out.log
+sync
+echo | tee -a ${W_OUT}/merge2out.log
+echo "Copying w-distro/${TARGETARCH}/${COMPATDISTRO}/*...  (files all levels)" | tee -a ${W_OUT}/merge2out.log
+echo "Copying ${COMPATVERSION_DIR}/*..." | tee -a ${W_OUT}/merge2out.log
+#copy any top-level files, going down...
+for ONETOP in \
+`find w-distro -mindepth 1 -maxdepth 1 -type f | tr '\n' ' '` \
+`find w-distro/${TARGETARCH} -mindepth 1 -maxdepth 1 -type f | tr '\n' ' '` \
+`find w-distro/${TARGETARCH}/${COMPATDISTRO} -mindepth 1 -maxdepth 1 -type f | tr '\n' ' '` \
+`find ${COMPATVERSION_DIR} -mindepth 1 -maxdepth 1 -type f | tr '\n' ' '`
+do
+	echo "    $ONETOP" >> ${W_OUT}/merge2out.log
+	cp -a -f --remove-destination $ONETOP ${W_OUT}/ 2>&1 | tee -a ${W_OUT}/merge2out.log
+done
+echo | tee -a ${W_OUT}/merge2out.log
+
+# merge_to_w_out is from _00func
+. w-code/_00func
+for ONEDIRECTORY in patches $sdirs
+do
+	[ -d "${COMPATVERSION_DIR}/${ONEDIRECTORY}" ] && merge_to_w_out "${COMPATVERSION_DIR}/${ONEDIRECTORY}"
+done
+
+W_OUT_REALPATH=$(realpath ${W_OUT})
+if [ "$ALTERNATE_BUILD" != "" ];then
+	( cd "${ALTERNATE_BUILD%/*}"
+	tar -cJf ${W_OUT_REALPATH}/rootfs-skeleton/root/.packages/ALTERNATE_BUILD-${ALTERNATE_BUILD##*/}.tar.xz --exclude-vcs --exclude='w.conf' ${ALTERNATE_BUILD##*/} ) 2>&1 | tee -a ${W_OUT}/merge2out.log
+fi
+if [ "$EXTRA_MERGE" != "" ];then
+	for ONEDIRECTORY in patches $sdirs
+	do
+		[ -d "${EXTRA_MERGE}/${ONEDIRECTORY}" ] && merge_to_w_out "${EXTRA_MERGE}/${ONEDIRECTORY}"
+	done
+	for ONE_FILE in `find ${EXTRA_MERGE} -mindepth 1 -maxdepth 1 -type f | tr '\n' ' '`
+	do
+		echo "    $ONE_FILE" | tee -a ${W_OUT}/merge2out.log
+		cp -a -f --remove-destination $ONE_FILE ${W_OUT}/ 2>&1 | tee -a ${W_OUT}/merge2out.log
+	done
+	( cd "${EXTRA_MERGE%/*}"
+	tar -cJf ${W_OUT_REALPATH}/rootfs-skeleton/root/.packages/EXTRA_MERGE-${EXTRA_MERGE##*/}.tar.xz --exclude-vcs --exclude='w.conf' ${EXTRA_MERGE##*/} ) 2>&1 | tee -a ${W_OUT}/merge2out.log
+fi
+
+cp -a README ${W_OUT}/README.TXT 2>&1 | tee -a ${W_OUT}/merge2out.log
+sync
+
+echo "W_HOSTARCH='$HOSTARCH'
+W_TARGETARCH='${TARGETARCH}'
+W_COMPATDISTRO='${COMPATDISTRO}'
+W_COMPATVERSION='${COMPATVERSION}'" > ${W_OUT}/W_MERGEVARS
+
+if [ "`stat -c %U:%G $0`" != 'root:root' ] ; then
+	[ "${W_OUT}" != "/" ] && chown -R root:root ${W_OUT} 2>&1 | tee -a ${W_OUT}/merge2out.log
+fi
+
+echo -e "\nUndoing VCS-friendly stuff..." | tee -a ${W_OUT}/merge2out.log
+(
+cd ${W_OUT}
+for d in $sdirs huge_kernel
+do
+	[ -d "${d}" ] && find $d -type f -name EMPTYDIRMARKER -delete
+done
+sync
+. ./_00func
+create_local_repos_dirs
+. ./DISTRO_SPECS
+if [ -f ./DISTRO_COMPAT_REPOS-${DISTRO_BINARY_COMPAT}-${DISTRO_COMPAT_VERSION} ];then
+	[ -f ./DISTRO_COMPAT_REPOS ] && rm -f ./DISTRO_COMPAT_REPOS
+fi
+) 2>&1 | tee -a ${W_OUT}/merge2out.log
+
+sed -i '/W_VERSION=/d' ${W_OUT}/DISTRO_SPECS
+echo "W_VERSION=${W_VERSION}" >> ${W_OUT}/DISTRO_SPECS
+
+#record target architecture in DISTRO_SPECS (will end up in /etc/ in PLinux build)...
+sed -i '/DISTRO_TARGETARCH=/d' ${W_OUT}/DISTRO_SPECS
+echo "DISTRO_TARGETARCH='${TARGETARCH}'" >> ${W_OUT}/DISTRO_SPECS
+
+#
+sed -i '/NO_MULTIARCH_SYMLINK=/d' ${W_OUT}/DISTRO_SPECS
+echo "NO_MULTIARCH_SYMLINK=1" >> ${W_OUT}/DISTRO_SPECS
+
+#record the w state we build from
+sed -i '/BUILD_FROM_W=/d' ${W_OUT}/DISTRO_SPECS
+if which git &>/dev/null && [ "`git log -n 1`" != "" ]; then
+	GITBRANCH=$(git rev-parse --abbrev-ref HEAD)
+	GITHEAD=$(git log -n 1 --pretty=format:"%h;%ci") # git rev-parse HEAD
+	if [ "$ALTERNATE_BUILD" != "" -o "$EXTRA_MERGE" != "" ];then
+		echo "BUILD_FROM_W='${GITBRANCH};${GITHEAD};ALTERNATE_BUILD=${ALTERNATE_BUILD##*/};EXTRA_MERGE=${EXTRA_MERGE##*/}'" >> ${W_OUT}/DISTRO_SPECS
+	else
+		echo "BUILD_FROM_W='${GITBRANCH};${GITHEAD}'" >> ${W_OUT}/DISTRO_SPECS
+	fi
+else
+	echo "BUILD_FROM_W=\"No info available\"" >> ${W_OUT}/DISTRO_SPECS
+fi
+
+# make sure target has these...
+(
+	cp -afv w-arch/${TARGETARCH}/build/support/debdb2pupdb ${W_OUT}/rootfs-skeleton/usr/local/petget/ 2>&1
+	cp -afv w-arch/${TARGETARCH}/build/support/find_cat ${W_OUT}/rootfs-skeleton/usr/local/petget/ 2>&1 
+) | tee -a ${W_OUT}/merge2out.log
+
+echo
+echo "Directory '${W_OUT}'
+is now normal (the workarounds have been removed). Note,
+../local-repositories has been created (if not already),
+to be used as a common binary package download place."
+
+### END ###

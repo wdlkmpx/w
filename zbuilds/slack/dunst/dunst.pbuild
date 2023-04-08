@@ -1,0 +1,54 @@
+# dunst
+
+. ../func
+. ../build.conf
+
+URL=http://knopwob.org/public/dunst-release
+PKG=dunst
+VER=1.0.0
+COMP=tar.bz2
+DESC="a light weight notification daemon"
+DEPS=+libxdg-basedir
+CAT=BuildingBlock
+DESKTOP=dunst.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+#[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+build() {
+	cd ${PKG}-${VER}
+	sed -i 's%\/local%%' config.mk
+	make $MKFLG
+	[ "$?" -eq 0 ] || exit
+	make DESTDIR=$CWD/${PKG}-install install
+	cd -
+}
+	
+package() {
+	# this is CUSTOM for dunst
+	install -d -m 0755 ./${PKG}-install/root/.config/dunst
+	install -m 0644 dunstrc ./${PKG}-install/root/.config/dunst
+	# this is CUSTOM for dunst
+	if [ -f "$DESKTOP" ];then
+		install -d -m 0755 ./${PKG}-install/root/.config/autostart
+		cat $DESKTOP > ./${PKG}-install/root/.config/autostart/$DESKTOP
+	fi
+	
+}
+
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+build
+package
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT

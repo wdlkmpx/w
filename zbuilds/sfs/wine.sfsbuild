@@ -1,0 +1,141 @@
+#!/bin/sh
+# slackware wine package (stable_ from sourceforge
+
+# https://sourceforge.net/projects/wine/files/Slackware%20Packages
+
+# https://github.com/madewokherd/wine-mono/releases
+# https://wiki.winehq.org/Mono
+
+# http://dl.winehq.org/wine/wine-gecko/
+# https://wiki.winehq.org/Gecko
+
+#========================================================
+
+help() {
+    echo "create slackware wine stable SFS
+usage:
+
+    $0 <6|7|8> [arch]
+
+6 & 7: slackware 14.2
+8    : slackware 15.0
+
+[arch] can be i686 or x86_64 (leave empty to build both)"
+    exit
+}
+
+case $1 in
+  8)
+	# https://dl.winehq.org/wine/source/8.0/
+	ID='slack15.0'
+	WINE_VER=8.0
+	WINE_VER_DIR=${WINE_VER}
+	GECKO_VER=2.47.3
+	MONO_VER=7.4.1
+    ;;
+  7)
+	# https://dl.winehq.org/wine/source/7.0/
+	ID='slack14.2'
+	WINE_VER=7.0
+	#WINE_VER=7.0.1 -> ID=slack15.0
+	WINE_VER_DIR=${WINE_VER}
+	GECKO_VER=2.47.2
+	MONO_VER=7.0.0
+    ;;
+  6)
+	# https://dl.winehq.org/wine/source/6.0/
+	ID='slack14.2'
+	WINE_VER=6.0.2
+	WINE_VER_DIR=${WINE_VER}
+	GECKO_VER=2.47.2
+	MONO_VER=5.1.1
+    ;;
+  *)
+    help ;;
+esac
+
+#from 6 onwards everything is consistent
+wine_mono_tarball=wine-mono-${MONO_VER}-x86.tar.xz
+
+#========================================================
+
+OUTPUT_DIR=$(pwd)/output
+mkdir -p $(pwd)/output
+. ./0common_functions.sh
+
+S_COMP="-comp gzip" #xz gzip lzo lz4
+
+ARCHES='i686 x86_64'
+if [ "$2" ] ; then
+    case $2 in
+        32|i686)   ARCHES="i686"   ;;
+        64|x86_64) ARCHES="x86_64" ;;
+        all) ok=1 ;;
+        *) help ;; #invalid arch
+    esac
+fi
+
+#=====================================================
+
+mkdir -p pkg
+cd pkg
+CWD=$(pwd)
+
+
+for i in ${ARCHES}
+do
+    cd ${CWD}
+    PKG_DIR=$(pwd)/wine-${WINE_VER}-${ID}_${i}
+    mkdir -p ${PKG_DIR}
+
+    case $i in
+        i686)
+            wine_gecko_tarball=wine-gecko-${GECKO_VER}-x86.tar.xz
+            wine_tarball=wine-${WINE_VER}-i686-1sg.txz
+            ;;
+        x86_64)
+            wine_gecko_tarball=wine-gecko-${GECKO_VER}-x86_64.tar.xz
+            wine_tarball=wine-${WINE_VER}-x86_64-1sg.txz
+            ;;
+    esac
+
+    if [ "$wine_mono_tarball" ] ; then
+        common_dl_file https://github.com/madewokherd/wine-mono/releases/download/wine-mono-${MONO_VER}/${wine_mono_tarball}
+    fi
+
+    if [ "$wine_gecko_tarball" ] ; then
+        common_dl_file http://dl.winehq.org/wine/wine-gecko/${GECKO_VER}/${wine_gecko_tarball}
+    fi
+
+    common_dl_file  https://sourceforge.net/projects/wine/files/Slackware%20Packages/${WINE_VER_DIR}/i686/${wine_tarball}
+
+
+    if [ "${wine_gecko_tarball}" ] ; then
+        mkdir -p ${PKG_DIR}/usr/share/wine/gecko
+        tar -C ${PKG_DIR}/usr/share/wine/gecko -xf ${wine_gecko_tarball}
+    fi
+
+    if [ "$wine_mono_tarball" ] ; then
+        mkdir -p ${PKG_DIR}/usr/share/wine/mono
+        tar -C ${PKG_DIR}/usr/share/wine/mono -xf ${wine_mono_tarball}
+    fi
+
+    tar -C ${PKGDIR_DIR} -xf ${wine_tarball}
+    (
+        cd ${PKG_DIR}
+        sh install/doinst.sh
+        rm -rf install
+    )
+
+    #cp -a fonts ${PKG_DIR}/usr/share/wine
+    rm -f ${PKG_DIR}/usr/share/applications/mimeinfo.cache
+    if [ -f ${PKG_DIR}/usr/share/applications/wine.desktop ] ; then
+        # slackbuild
+        sed -i 's/%f//' ${PKG_DIR}/usr/share/applications/wine.desktop
+        sed -i 's%Categories=.*%Categories=System%' ${PKG_DIR}/usr/share/applications/winecfg.desktop
+        sed -i '/NoDisplay/d ; /Categories/d' ${PKG_DIR}/usr/share/applications/wine.desktop
+        echo 'NoDisplay=true' >> ${PKG_DIR}/usr/share/applications/wine.desktop
+    fi
+
+    common_dir2sfs ${PKG_DIR}
+done

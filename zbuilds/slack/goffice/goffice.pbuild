@@ -1,0 +1,41 @@
+# goffice
+
+. ../func
+. ../build.conf
+
+URL=http://ftp.gnome.org/pub/gnome/sources/goffice/0.8
+PKG=goffice
+VER=0.8.17
+COMP=tar.xz
+DESC="library for gtk based office programs"
+DEPS=+glib2
+CAT=BuildingBlock
+DESKTOP=goffice.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+patch_me() {
+	for i in *.patch; do
+		echo "Applying $i"
+		patch -p0 < $i || exit 1
+	done
+}
+
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+patch_me
+build_configure $PKG $VER $LIBDIR
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	
+alert $PKG

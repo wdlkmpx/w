@@ -1,0 +1,189 @@
+#!/bin/sh
+# Public domain
+#
+
+S_COMP="-comp gzip" #xz gzip lzo lz4
+
+# https://github.com/indygreg/python-build-standalone/releases
+#this is compiled with a recent clang version, i.e 15.0+
+CPYTHON_VER=3.10.9+20230116
+PYTHON_PORTABLE_i686=https://github.com/indygreg/python-build-standalone/releases/download/${CPYTHON_VER#*+}/cpython-${CPYTHON_VER}-i686-unknown-linux-gnu-install_only.tar.gz
+PYTHON_PORTABLE_x86_64=https://github.com/indygreg/python-build-standalone/releases/download/${CPYTHON_VER#*+}/cpython-${CPYTHON_VER}-x86_64-unknown-linux-gnu-install_only.tar.gz
+#PYTHON_PORTABLE_x86_64=https://github.com/indygreg/python-build-standalone/releases/download/${CPYTHON_VER#*+}/cpython-${CPYTHON_VER}-x86_64-unknown-linux-musl-install_only.tar.gz
+
+PERL_PORTABLE_i686=
+PERL_FILE_i686=
+#PERL_PORTABLE_x86_64=https://github.com/skaji/relocatable-perl/releases/download/5.36.0.1/perl-linux-amd64.tar.xz
+PERL_FILE_x86_64=perl-5.36.0.1-linux-amd64.tar.xz
+
+# https://github.com/mesonbuild/meson/releases
+meson_ver=1.0.1
+meson_url=https://github.com/mesonbuild/meson/releases/download/${meson_ver}/meson-${meson_ver}.tar.gz
+
+# https://sourceforge.net/projects/scons/files/scons-local
+scons_ver=4.5.2
+scons_url=https://sourceforge.net/projects/scons/files/scons-local/${scons_ver}/scons-local-${scons_ver}.tar.gz
+
+# youtube-dl
+youtubedl_ver=2023.03.25.810
+youtubedl_url=https://github.com/ytdl-patched/youtube-dl/releases/download/${youtubedl_ver}/youtube-dl
+
+
+help()
+{
+	echo "
+Create sfs of python3 
+- This is basically for old distros with an unsuitable python version
+
+Syntax:
+    $0 <32|64>
+    $0 <i686|x86_64>
+    $0 pyz
+
+Special recognized versions:
+
+    pyz: download and create a special sfs file with python zipapps
+         that are installed to /opt/python3 (ready to be symlinked)
+"
+	exit
+}
+
+
+case ${1} in 
+	32|i686)
+		PYTHON_URL=${PYTHON_PORTABLE_i686}
+		ARCH=i686
+		;;
+	64|x86_64)
+		PYTHON_URL=${PYTHON_PORTABLE_x86_64}
+		ARCH=x86_64
+		;;
+	pyz)
+		ZIPAPPS=1
+		;;
+	*)
+		help
+		exit
+		;;
+esac
+
+
+# ====================================================================
+
+OUTPUT_DIR=$(pwd)/output ; mkdir -p $(pwd)/output
+. ./0common_functions.sh
+
+mkdir -p tmp_python
+cd tmp_python
+
+CWD=$(pwd)
+
+# ====================================================================
+
+set -x
+
+if [ "$ZIPAPPS" ] ; then
+	common_dl_file ${meson_url}
+	common_dl_file ${scons_url}
+	common_dl_file ${youtubedl_url} youtube-dl-${youtubedl_ver}
+	common_dl_file https://bootstrap.pypa.io/pip/pip.pyz
+	#common_dl_file https://bootstrap.pypa.io/virtualenv/virtualenv.pyz
+	#--
+	PKGVER=$(date "+%Y.%m")
+	PKGDIR=python3_zipapps-${PKGVER}
+	mkdir -p ${PKGDIR}/opt/python3
+	## meson
+	MESON_PYZ=1
+	if [ "$MESON_PYZ" ] ; then
+		# meson.pyz is slow, not recommended..
+		tar -xf meson-${meson_ver}.tar.gz
+		(
+			cd meson-${meson_ver}
+			./packaging/create_zipapp.py \
+				--outfile meson-${meson_ver}.pyz \
+				--interpreter '/usr/bin/env python3' #<source checkout>
+			## how to do it with shell code (follow the same logic as packaging/create_zipapp.py)
+			#rm -rf tmpmeson
+			#mkdir tmpmeson
+			#cp -a meson.py tmpmeson/__main__.py
+			#cp -a mesonbuild tmpmeson/
+			#	python3 -m zipapp \
+			#	tmpmeson \
+			#	-o meson-${meson_ver}.pyz \
+			#	-p '/usr/bin/env python3'
+			#	#-c True
+		)
+		cp -af meson-${meson_ver}/meson-${meson_ver}.pyz ${PKGDIR}/opt/python3/
+		ln -sv meson-${meson_ver}.pyz ${PKGDIR}/opt/python3/meson
+		sync
+		rm -rf meson-${meson_ver}
+	elif [ ! -d ${PKGDIR}/opt/python3/meson-${meson_ver} ] ; then
+		tar -C ${PKGDIR}/opt/python3 -xf meson-${meson_ver}.tar.gz
+		find ${PKGDIR}/opt/python3/meson-${meson_ver} -maxdepth 1 -mindepth 1 -type d | \
+			grep -v mesonbuild | \
+				while read xdir ; do rm -rf "$xdir" ; done
+		echo "" > ${PKGDIR}/opt/python3/${PKGVER}
+		sync
+		sleep 1
+		ln -snfv meson-${meson_ver}/meson.py ${PKGDIR}/opt/python3/meson.py
+	fi
+	## scons
+	if [ ! -d ${PKGDIR}/opt/python3/scons-local-${scons_ver} ] ; then
+		tar -C ${PKGDIR}/opt/python3 -xf scons-local-${scons_ver}.tar.gz
+		sed -i 's%/usr/bin/env python$%/usr/bin/env python3%' ${PKGDIR}/opt/python3/*.py
+		rm -fv ${PKGDIR}/opt/python3/*.bat
+		rm -fv ${PKGDIR}/opt/python3/*LICENSE
+		rm -fv ${PKGDIR}/opt/python3/*README
+	fi
+	## pip / virtualenv
+	if [ -f pip.pyz ] ; then
+		cp -af pip.pyz        ${PKGDIR}/opt/python3/pip.pyz
+	fi
+	if [ -f virtualenv.pyz ] ; then
+		cp -af virtualenv.pyz ${PKGDIR}/opt/python3/virtualenv.pyz
+	fi
+	## youtube-dl
+	chmod +x youtube-dl-${youtubedl_ver}
+	cp -af youtube-dl-${youtubedl_ver} ${PKGDIR}/opt/python3
+	ln -sv youtube-dl-${youtubedl_ver} ${PKGDIR}/opt/python3/youtube-dl
+	#--
+	chmod +x ${PKGDIR}/opt/python3/*.py
+	chmod +x ${PKGDIR}/opt/python3/*.pyz
+else
+	# - this python pkg becomes the system python
+	# - x86_64: can't use lib64, python is hardcoded to use ../lib/..
+	#           create symlinks
+	# - not sure how well this integrates with old systems
+	#   maybe the .pc should be deleted (if it breaks stuff)
+	common_dl_file ${PYTHON_URL}
+	PKGVER=${CPYTHON_VER//+/_}
+	PKGDIR=python3-${PKGVER}-${ARCH}
+	mkdir -p ${PKGDIR}/usr
+	if [ ! -f ${PKGDIR}/usr/lib/libpython3.so ] ; then
+		tar -C ${PKGDIR}/usr --strip=1 -xf $(basename "${PYTHON_URL}")
+		ln -sv python3 ${PKGDIR}/usr/bin/python
+		if [ "$ARCH" = "x86_64" ] ; then
+			mkdir -p ${PKGDIR}/usr/lib64
+			for i in $(ls ${PKGDIR}/usr/lib | grep -v pkgconfig)
+			do
+				ln -sv ../lib/${i} ${PKGDIR}/usr/lib64/${i}
+			done
+			#-- special case
+			mkdir -p ${PKGDIR}/usr/lib64/pkgconfig
+			for i in $(ls ${PKGDIR}/usr/lib/pkgconfig)
+			do
+				ln -sv ../lib/pkgconfig/${i} ${PKGDIR}/usr/lib64/pkgconfig/${i}
+			done
+			#--
+			sedp="s%^prefix=.*%prefix=/usr% ; s%^libdir=.*%libdir=/usr/lib64%"
+		else
+			sedp="s%^prefix=.*%prefix=/usr% ; s%^libdir=.*%libdir=/usr/lib%"
+		fi
+		sed -i "$sedp" ${PKGDIR}/usr/lib/pkgconfig/*.pc
+	fi
+fi
+
+
+mksquashfs ${PKGDIR} ${PKGDIR}.sfs ${S_COMP}
+sha256sum ${PKGDIR}.sfs > ${PKGDIR}.sfs.sha256.txt
+mv ${PKGDIR}.sfs* ${OUTPUT_DIR}

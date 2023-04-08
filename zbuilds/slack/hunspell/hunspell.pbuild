@@ -1,0 +1,33 @@
+# hunspell
+
+. ../func
+. ../build.conf
+
+VER=1.6.0
+URL=https://github.com/hunspell/hunspell/archive/
+PKG=hunspell
+COMP=tar.gz
+DESC="spell checking library"
+DEPS=
+CAT=BuildingBlock
+DESKTOP=hunspell.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+# main
+retrieve v${VER}.${COMP}
+extract v${VER}.${COMP}
+(cd ${PKG}-${VER};autoreconf -vfi)
+build_configure $PKG $VER $LIBDIR
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

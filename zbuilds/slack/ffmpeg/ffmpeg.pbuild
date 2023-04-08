@@ -1,0 +1,80 @@
+# ffmpeg
+
+. ../func
+. ../build.conf
+
+#NOTE: USE THIS ONE IF YOU WANT A 3 VERSION FFMPEG
+
+URL=https://www.ffmpeg.org/releases
+PKG=ffmpeg
+VER=3.2.4
+SDL=SDL2
+COMP=tar.bz2
+DESC="FFmpeg is the leading multimedia framework, able to decode, encode, transcode, mux, demux, stream, filter and play pretty much anything"
+DEPS=+${SDL},+x264,+x265,+libogg,+libvorbis,+fdk-aac,+libvpx,+libtheora,+lame
+CAT=Multimedia
+DESKTOP=ffmpeg.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+#[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+build() {
+	cd ${PKG}-${VER}
+	./configure --prefix=/usr \
+				--libdir=/usr/${LIBDIR} \
+				--enable-libmp3lame \
+				--enable-libx264 \
+				--enable-libx265 \
+				--enable-libfdk-aac \
+				--enable-pthreads \
+				--enable-small \
+				--enable-postproc \
+				--enable-libvorbis \
+				--enable-gpl \
+				--enable-shared \
+				--enable-nonfree \
+				--enable-libopencore-amrnb \
+				--enable-libopencore-amrwb \
+				--disable-debug \
+				--enable-bzlib \
+				--enable-zlib \
+				--enable-version3 \
+				--enable-runtime-cpudetect \
+				--enable-x11grab \
+				--enable-libtheora \
+				--enable-libxvid  \
+				--enable-swscale \
+				--enable-libvpx
+	[ "$?" -eq 0 ] || exit
+	make $MKFLG
+	[ "$?" -eq 0 ] || exit
+	make DESTDIR=$CWD/${PKG}-install install
+	cd -
+}
+	
+hack_() {
+	# this is a woeful bug in old (pre 3.0?) ffmpeg install
+	if [ "$ARCH" = "x86_64" ];then
+		if [ -d ${PKG}-install/usr/lib/ ];then
+			mv -f ${PKG}-install/usr/lib ${PKG}-install/usr/lib64
+			sed -i "s%lib$%lib64%g" ${PKG}-install/usr/lib64/pkgconfig/* 2>/dev/null
+		fi
+	fi
+}
+
+# main
+retrieve "${PKG}-${VER}.${COMP} --no-check-certificate"
+extract ${PKG}-${VER}.${COMP}
+build
+hack_
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

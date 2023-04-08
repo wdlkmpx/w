@@ -1,0 +1,47 @@
+# osmo
+
+. ../func
+. ../build.conf
+
+URL=http://distro.ibiblio.org/puppylinux/sources/o
+PKG=osmo
+VER=0.2.10.0-patched
+SRC_VER=0.2.10-patched_96dpi_version_libnotify
+COMP=tar.gz
+DESC="Light weight calendar and organiser"
+DEPS=+gtk+2,+libgtkhtml,+libnotify
+CAT=Personal
+DESKTOP=osmo.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+build() {
+	mv ${PKG}-${SRC_VER} ${PKG}-${VER}
+	# since not X compiling forget build triplet
+	cd ${PKG}-${VER}
+	./configure --prefix=/usr \
+				--localstatedir=/var \
+				--sysconfdir=/etc \
+				--libdir=/usr/${LIBDIR}
+	[ "$?" -eq 0 ] || exit
+	make $MKFLG
+	[ "$?" -eq 0 ] || exit
+	make DESTDIR=$CWD/$PKG-install install
+	cd -
+}
+	
+# main
+retrieve ${PKG}-${SRC_VER}.${COMP}
+extract ${PKG}-${SRC_VER}.${COMP}
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

@@ -1,0 +1,92 @@
+Pup-Kview-1.3.6|Pup-Kview|1.3.6||System|35K||Pup-Kview-1.3.6.pet||Kernel module viewer||||
+PupApps-3.1|PupApps|3.1||Utility|229K||PupApps-3.1.pet||Launch favorite applications||||
+PupClockset-2.7|PupClockset|2.7||Desktop|125K||PupClockset-2.7.pet||PupClockset manager||||
+PupControl-3.3|PupControl|3.3||Setup|562K||PupControl-3.3.pet||Control panel||||
+PupMenu-6.2.1|PupMenu|6.2.1||Utility|442K||PupMenu-6.2.1.pet||Menu item launcher and editor||||
+Pup-SysInfo-2.8.6|Pup-SysInfo|2.8.6||System|195K||Pup-SysInfo-2.8.6.pet||System information utility||||
+SaveFolderBackup-1.2|SaveFolderBackup|1.2||Utility|44K||SaveFolderBackup-1.2.pet|+lzop|Save folder backup and restore||||
+acpid-busibox-4|acpid-busibox|4||BuildingBlock|120K||acpid-busibox-4.pet||acpi deamon with dialog box and lid supend||||
+bbwireless-0.1-noarch|bbwireless|0.1-noarch||Network|88K||bbwireless-0.1-noarch.pet||BBwireless network manager||||
+cpu-scaling-ondemand-1.3-3|cpu-scaling-ondemand|1.3-3||Setup|60K||cpu-scaling-ondemand-1.3-3.pet|+gtkdialog|CPU Frequency Scaling Tool||||
+default-raspi-boot-0.2-noarch|default-raspi-boot|0.2-noarch||Setup|32K||default-raspi-boot-0.2-noarch.pet|+gtkdialog|Set Default Boot Option||||
+ffconvert-1.4.3|ffconvert|1.4.3||Multimedia|208K||ffconvert-1.4.3.pet|+ffmpeg|FFConvert multimedia converter||||
+ffconvert_NLS-1.2.1|ffconvert_NLS|1.2.1||Multimedia|304K||ffconvert_NLS-1.2.1.pet|+ffconvert|FFConvert multimedia converter||||
+fix_pi_overscan-0.3-rpi_all|fix_pi_overscan|0.3-rpi_all||Desktop|68K||fix_pi_overscan-0.3-rpi_all.pet||Pi Overscan or Underscan||||
+frisbee-1.4.4|frisbee|1.4.4||Network|280K||frisbee-1.4.4.pet|+gtkdialog&ge0.8.4|Frisbee network manager||||
+get_libreoffice-0.43|get_libreoffice|0.43||Document|82K||get_libreoffice-0.43.pet||Get LibreOffice download and install LibreOffice||||
+grub2_efi-2.02.2018.08-fd64|grub2_efi|2.02.2018.08-fd64||BuildingBlock|5588||grub2_efi-2.02.2018.08-fd64.pet||No description provided||||
+gtk_theme_citrus_cut-1.2|gtk_theme_citrus_cut|1.2||Desktop|172K||gtk_theme_citrus_cut-1.2.pet|+gtk+|gtk2 orangy theme||||
+gtk_theme_collection_vicmz-20121106|gtk_theme_collection_vicmz|20121106||Desktop|10736K||gtk_theme_collection_vicmz-20121106.pet|+gtk+|A large collection of GTK themes collected by vicmz.||||
+gtk_theme_delicate_blue-1|gtk_theme_delicate_blue|1||Desktop|48K||gtk_theme_delicate_blue-1.pet|+gtk+|gtk theme, light blue/grey, graduated blue buttons||||
+gtk_theme_eucalypt-0.1|gtk_theme_eucalypt|0.1||BuildingBlock|152K||gtk_theme_eucalypt-0.1.pet||gtk theme||||
+gtk_theme_fishing_the_sky-0.4|gtk_theme_fishing_the_sky|0.4||Desktop|116K||gtk_theme_fishing_the_sky-0.4.pet|+gtk+|gtk theme, small grey||||
+gtk_theme_fishpie-0.11|gtk_theme_fishpie|0.11||Desktop|304K||gtk_theme_fishpie-0.11.pet|+gtk+|gtk theme||||
+gtk_theme_flatbluecontrast-1|gtk_theme_flatbluecontrast|1||Desktop|48K||gtk_theme_flatbluecontrast-1.pet|+gtk+|Theme for GTK, flat blue, contrasting shades||||
+gtk_theme_flat_grey-1|gtk_theme_flat_grey|1||Desktop|48K||gtk_theme_flat_grey-1.pet||gtk theme||||
+gtk_theme_flat_grey_rounded-1|gtk_theme_flat_grey_rounded|1||Desktop|48K||gtk_theme_flat_grey_rounded-1.pet|+gtk+|gtk theme, flat grey, buttons slightly rounded||||
+gtk_theme_glassy_sky-1|gtk_theme_glassy_sky|1||Desktop;appearance|56K||gtk_theme_glassy_sky-1.pet|+gtk+|sky-blue theme for gtk||||
+gtk_theme_gradient_brown-0.9|gtk_theme_gradient_brown|0.9||Desktop|32K||gtk_theme_gradient_brown-0.9.pet|+gtk+|gtk very basic theme||||
+gtk_theme_gradient_grey-1.2|gtk_theme_gradient_grey|1.2||Desktop|32K||gtk_theme_gradient_grey-1.2.pet|+gtk+|gtk very basic theme, gradient grey||||
+gtk_theme_m8darker-1.0|gtk_theme_m8darker|1.0||Desktop|156K||gtk_theme_m8darker-1.0.pet|+gtk+|gtk dark grey flat theme||||
+gtk_theme_phacile_blue-1.3-1|gtk_theme_phacile_blue|1.3-1||Desktop|488K||gtk_theme_phacile_blue-1.3-1.pet|+gtk+|gtk blue-grey theme||||
+gtk_theme_rockstar-0.1|gtk_theme_rockstar|0.1||Desktop|160K||gtk_theme_rockstar-0.1.pet||turquoise based gtk theme||||
+gtk_theme_ShallowThought-0.2|gtk_theme_ShallowThought|0.2||BuildingBlock|220K||gtk_theme_ShallowThought-0.2.pet||gtk desktop theme||||
+gtk_theme_stardust_zigbert-0.5|gtk_theme_stardust_zigbert|0.5||Desktop|45K||gtk_theme_stardust_zigbert-0.5.pet|+gtk+|gtk light blue 3d theme||||
+gtk_theme_stark-1|gtk_theme_stark|1||Desktop|48K||gtk_theme_stark-1.pet|+gtk+|stark black/white theme for gtk, with faint colours and bright orange splashes||||
+gtk_theme_stark-blueish-1|gtk_theme_stark-blueish|1||Desktop|48K||gtk_theme_stark-blueish-1.pet|+gtk+|stark black/white theme for gtk, with faint colours and blueish highlights||||
+gtkthememaker-1.4|gtkthememaker|1.4||Desktop|68K||gtkthememaker-1.4.pet||GTK Theme Maker, design a theme for GTK windows||||
+hunspell-en-us-2|hunspell-en-us|2||BuildingBlock|732K||hunspell-en-us-2.pet|+hunspell,+enchant|US English dictionary|||official|
+kernel_headers_musl-3.12.6-5-noarch|kernel_headers_musl|3.12.6-5-noarch||BuildingBlock|5152K||kernel_headers_musl-3.12.6-5-noarch.pet||kernel headers for musl libc||||
+linux_firewall-2.0rc9-patched3-1|linux_firewall|2.0rc9-patched3-1||Network|132K||linux_firewall-2.0rc9-patched3-1.pet||Firewall, with gui install||||
+multirename-1.8|multirename|1.8||Filesystem|56K||multirename-1.8.pet||Batch file renamer||||
+multirename_NLS-1.8|multirename_NLS|1.8||BuildingBlock|28K||multirename_NLS-1.8.pet||no description provided||||
+network_roxapp-0.8-1-utf8|network_roxapp|0.8-1-utf8||Network|96K||network_roxapp-0.8-1-utf8.pet||rox app samba share mounter||||
+network_roxapp_samba-0.11|network_roxapp_samba|0.11||Network|88K||network_roxapp_samba-0.11.pet||samba share mounter||||
+orientxauto-0.2-noarch|orientxauto|0.2-noarch||Desktop;settings|64K||orientxauto-0.2-noarch.pet|+pyhton,+pygobject|detect an accelerometer and rotate screen for e galax touchscreens||||
+pavrecord-0.9.6-1|pavrecord|0.9.6-1||Internet|124K||pavrecord-0.9.6-1.pet||Pavrecord Audio-Video recorder/player||||
+pavrecord-precise-0.9.4|pavrecord-precise|0.9.4||Internet|116K||pavrecord-precise-0.9.4.pet|+ffmpeg,+ffplay,+gtkdialog3,+lame,+alsa-utils|Pavrecord Audio-Video recorder/player||||
+pcdripper-3.9.3|pcdripper|3.9.3||Multimedia|96K||pcdripper-3.9.3.pet|+xdialog,+gtkdialog,+cdrkit|Audio CD song ripper||||
+pclock-0.8.2|pclock|0.8.2||Personal|80K||pclock-0.8.2.pet||pClock Time tools||||
+pcurlftp_file_sharing-0.2-1|pcurlftp_file_sharing|0.2-1||Network|64K||pcurlftp_file_sharing-0.2-1.pet|+pure-ftpd,+curlftpfs,+mpscan,+xdialog,+fuse|connect to ftp servers||||
+peasydiff-1.4|peasydiff|1.4||Setup|44K||peasydiff-1.4.pet||compare two files/folders||||
+peasydisc-4.1|peasydisc|4.1||Multimedia|80K||peasydisc-4.1.pet||PeasyDisc||||
+peasyglue-2.0|peasyglue|2.0||Graphic|68K||peasyglue-2.0.pet||Image joiner||||
+peasypdf-4.2|peasypdf|4.2||Document|56K||peasypdf-4.2.pet||Manipulate PDF documents||||
+peasyprint-3.0|peasyprint|3.0||Graphic|48K||peasyprint-3.0.pet||PeasyPrint graphic/photo printing||||
+peasyscale-2.0|peasyscale|2.0||Graphic|68K||peasyscale-2.0.pet||graphic resizer||||
+peasyscan-2.12|peasyscan|2.12||Graphic|172K||peasyscan-2.12.pet||PeasyScan simple image scanner||||
+peasywifi-4.5|peasywifi|4.5||Network|136K||peasywifi-4.5.pet||Reliable WiFi connection manager||||
+pequalizer-1.0.0|pequalizer|1.0.0||Multimedia|76K||pequalizer-1.0.0.pet|+alsaequal,+caps|pequalizer Graphical Equalizer||||
+pfilesearch-2.1|pfilesearch|2.1||BuildingBlock|84K||pfilesearch-2.1.pet|+gtkdialog|file finder engine|||official|
+pfind-6.3|pfind|6.3||Filesystem|164K||pfind-6.3.pet|+gtkdialog,+pfilesearch|pFind file finder|||official|
+pgprs2-0.5|pgprs2|0.5||Network|60K||pgprs2-0.5.pet|+ppp|Connect via GPRS or 3G modem||||
+pmetatagger-2.2|pmetatagger|2.2||Multimedia|100K||pmetatagger-2.2.pet|+gtkdialog3,+id3lib,+vorbis-tools|meta tagger||||
+pmirrorget-0.2.1-1|pmirrorget|0.2.1-1||Internet;transfer|28K||pmirrorget-0.2.1-1.pet|+gtkdialog|Website File Grabber||||
+pnethood-0.7.i18n|pnethood|0.7.i18n||Network|108K||pnethood-0.7.i18n.pet|+nbtscan,+mountcifs,+samba_client|connect to samba shares||||
+precord-8.1.5|precord|8.1.5||Multimedia|96K||precord-8.1.5.pet|+ffmpeg,+gtkdialog3,+lame,+alsa-utils|Precord mp3,ogg,wav recorder/player||||
+precord-precise-8.1.5|precord-precise|8.1.5||Multimedia|104K||precord-precise-8.1.5.pet|+ffmpeg,+gtkdialog3,+lame,+alsa-utils|Precord mp3,ogg,wav recorder/player||||
+prename-0.7|prename|0.7||Filesystem|48K||prename-0.7.pet|+gtkdialog|batch file renamer||||
+pRun-1.3|pRun|1.3||Utility|51K||pRun-1.3.pet||Run dialog utility||||
+pschedule-1.1.6|pschedule|1.1.6||System|80K||pschedule-1.1.6.pet|+gtkdialog,+cron|Pschedule task on time||||
+psynclient-1.4|psynclient|1.4||System|60K||psynclient-1.4.pet|+gtkdialog,+xf86-input-synaptics|Configure your synaptics touchpad||||
+ptiming-1.0.3-1|ptiming|1.0.3-1||Personal|124K||ptiming-1.0.3-1.pet|+gtkdialog|pTiming event timer system|||official|
+pupmd5sum-1.7|pupmd5sum|1.7||BuildingBlock|176K||pupmd5sum-1.7.pet||Calculate MD5sum||||
+pupmixer-1.0|pupmixer|1.0||Multimedia|48K||pupmixer-1.0.pet|+gtkdialog,+alsa-utils,+alsa|ALSA Sound Mixer||||
+puppy-podcast-grabber-1.2|puppy-podcast-grabber|1.2||Internet;transfer|80K||puppy-podcast-grabber-1.2.pet||podcast grabber||||
+pupradio-0.19|pupradio|0.19||Multimedia|72K||pupradio-0.19.pet||pupRadio/pupTelly streaming media||||
+pupradio_NLS-0.19|pupradio_NLS|0.19||Multimedia|80K||pupradio_NLS-0.19.pet||pupradio translations||||
+pupsaveconfig-2.2.6|pupsaveconfig|2.2.6||Setup|196K||pupsaveconfig-2.2.6.pet||PupSave personal storage setup||||
+screeny-0.7-noarch|screeny|0.7-noarch||Graphic|32K||screeny-0.7-noarch.pet||Screeny Capture Windows and Fullscreen||||
+shareinternet-2.2.4-1|shareinternet|2.2.4-1||Network|136K||shareinternet-2.2.4-1.pet|+gtkdialog,+dnsmasq|run PLinux as a router||||
+snap2-4.26|snap2|4.26||Utility|168K||snap2-4.26.pet||snap2 snapshot backup||||
+tas-1.15|tas|1.15||X-GraphicUtility|40K||tas-1.15.pet||Screenshot utility||||
+tas_NLS-1.15|tas_NLS|1.15||BuildingBlock|36K||tas_NLS-1.15.pet||no description provided||||
+template-samba_debian-0.1-noarch|template-samba_debian|0.1-noarch||Network|164K||template-samba_debian-0.1-noarch.pet|+samba|Samba Simple Management||||
+type1-fonts-0.1-noarch|type1-fonts|0.1-noarch||Document|2468K||type1-fonts-0.1-noarch.pet||old bitmap type 1 fonts||||
+updates_mgr-0.21|updates_mgr|0.21||Setup|40K||updates_mgr-0.21.pet||Updates Manager - latest from Slackware||||
+updates_notice-0.1|updates_notice|0.1||Setup|32K||updates_notice-0.1.pet||Update notices - Slackware bugfixes|slackware|||
+usb-modeswitch-data-20191128-noarch_noarch|usb-modeswitch-data|20191128-noarch_noarch||BuildingBlock|2040||usb-modeswitch-data-20191128-noarch_noarch.pet|+usb-modeswitch,+jimtcl|Data for usb_modeswitch|common32|||
+wcpufreq-0.8.2|wcpufreq|0.8.2||System|116K||wcpufreq-0.8.2.pet||CPU Frequency Scaling Tool||||
+xlock_gui-0.2-7|xlock_gui|0.2-7||Desktop|68K||xlock_gui-0.2-7.pet|+xlockmore|Xlock setup||||
+YASSM-4.1|YASSM|4.1||Network|64K||YASSM-4.1.pet||Mounts Samba shares||||
+z_lowresource_hack-20120707|z_lowresource_hack|20120707||BuildingBlock|20K||z_lowresource_hack-20120707.pet||reduce resource usage and writes to flash when booting off flash memory||||

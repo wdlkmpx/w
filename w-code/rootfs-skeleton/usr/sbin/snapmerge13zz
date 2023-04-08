@@ -1,0 +1,268 @@
+#!/bin/sh
+#2007 Lesser GPL licence v2 (http://www.fsf.org/licensing/licenses/lgpl.html)
+#Barry Kauler www.puppylinux.com
+#called from save2flash and rc.shutdown, to save tmpfs layer to permanent flash storage.
+#8 oct 2007: screen out /root/tmp when saving.
+#v409 BK: save /var dir. previously screened out to save space, but prevents crontab from running.
+#100422 added ^root/ftpd exclusion.
+#100429 modify 'trash' exclusion.
+#100820 added /var/tmp exclusion (apparently filled by opera crashes).
+#110206 Dougal: clean up some testing. speedup: LANG=C, also change to /bin/ash.
+#110212 Jemimah: files may disappear, more efficient calc of free space, fix i/o err.
+#110222 shinobar: remove all /dev, allow 'pup_ro10-19', exit code for no space
+#110505 support sudo for non-root user.
+#120103 rerwin: screen out /.XLOADED when save.
+#140102 SFR: various fixes + gettext
+
+export TEXTDOMAIN=snapmerge13
+export OUTPUT_CHARSET=UTF-8
+
+OLDLANG="$LANG"
+export LANG=C
+
+case $1 in
+	-v) V="-v"
+esac
+
+#variables created at bootup by 'init' script in initramfs...
+. /etc/rc.d/PUPSTATE
+. /etc/DISTRO_SPECS
+
+[ "`whoami`" != "root" ] && exec sudo -A ${0} ${@}
+
+if [ $PUPMODE -ne 13 ] ; then
+	echo "$0: Wrong PUPMODE ($PUPMODE)"
+	exit 1
+fi
+
+SAVEPART="`echo -n "$PUPSAVE" | cut -f 1 -d ','`"
+
+SHUTDOWN="no"
+pidof rc.shutdown >/dev/null && SHUTDOWN="yes"
+XRUNNING="no"
+pidof X >/dev/null 2>&1 || pidof Xorg >/dev/null 2>&1 && XRUNNING="yes"
+
+PATH="/bin:/sbin:/usr/bin:/usr/sbin"
+WD="`pwd`"
+
+# all the action takes places inside $SNAP (ex: /initrd/pup_rw)
+SNAP="`cat /sys/fs/aufs/si_*/br0 | head -1 | cut -f1 -d'='`"
+cd $SNAP || exit 1
+
+# files are copied from $SNAP/* to $BASE/ (ex: /initrd/pup_ro1)
+BASE="`cat /sys/fs/aufs/si_*/br1 | head -1 | cut -f1 -d'='`"
+BASEMTP="$(stat -c %m "$BASE")"
+
+# Precautions
+if ! mountpoint -q "$BASEMTP" ; then
+	echo "$BASEMTP is not mounted!"
+	exit 1
+fi
+
+echo "Merging $SNAP onto $BASE..."
+
+# =============================================================================
+# WHITEOUTS
+# =============================================================================
+
+for XFL in /sys/fs/aufs/si_*/br[0-9]* #get aufs branch list
+do
+	XFN="${XFL##*/}"
+	[ ${XFN:2} -lt 2 ] && continue
+	SFSPoints="${SFSPoints}`cat ${XFL} | cut -f1 -d'='` "
+done
+
+find . -mount -name '.wh.*' -type f | \
+sed -e 's%^\./%% ; s%^\.wh\.%%' | \
+while read -r N
+do
+	DN="${N%/*}"  # dirname
+	BN="${N##*/}" # basename
+	if [ "$DN" = "$N" ] || [ "$DN" = "" ] ; then
+		DN="."
+	fi
+	if [ "$DN" = "." ] ; then
+		continue
+	fi
+	if [ "$BN" = ".wh.aufs" ] ; then
+		continue #aufs has file .wh..wh.aufs in /initrd/pup_rw.
+	fi
+	# .wh..wh..opq ...
+	if [ "$BN" = ".wh..opq" ] ; then
+		rm -rf "${BASE}/${DN}" 2>/dev/null  #wipe anything in save layer.
+		#jemimah: files sometimes mysteriously reappear if you don't delete 
+		#   and recreate the directory, aufs bug?
+		mkdir -p "${BASE}/${DN}"
+		#also need to save the whiteout file to block all lower layers (may be readonly)...
+		touch "${BASE}/${DN}/.wh..wh..opq" 2>/dev/null 
+		rm -f "$SNAP/$DN/.wh..wh..opq"  #should force aufs layer "reval".
+		continue
+	fi
+	#comes in here with the '.wh.' prefix stripped off, leaving actual filename...
+	rm -rf "$BASE/$N"
+ 
+	#if file exists on a lower layer, have to save the whiteout file...
+	for P in $SFSPoints
+	do
+		if [ -e "$P/$N" ] || [ -L "$P/$N" ] ; then	# SFR: broken symlinks also deserve to be processed ( '-e' won't detect them, needs to be also '-L')
+			[ -d "${BASE}/${DN}" ] || mkdir -p "${BASE}/${DN}"
+			touch "${BASE}/${DN}/.wh.${BN}"
+			break
+		fi
+	done #110206 End Dougal.
+	#-
+	rm -f $V "$SNAP/$DN/.wh.$BN" #remove whiteout file. should force aufs layer "reval".
+done
+
+# =============================================================================
+# DIRECTORIES
+# =============================================================================
+
+find . -mount -mindepth 1 -type d | \
+sed -e 's%^\./%%' | \
+grep -v -E '^mnt|^media|^initrd|^proc|^sys|^run$|^tmp|^root/tmp|^\.wh\.|/\.wh\.|^dev$|^dev/|^var/tmp' | \
+while read -r N
+do
+	#v4.01 graceful exit if shutdown X (see /usr/bin/restartwm,wmreboot,wmpoweroff)...
+	if [ "$XRUNNING" = "yes" ] && [ -f /tmp/wmexitmode.txt ] ; then
+		exit
+	fi
+	mkdir -p "$BASE/$N"
+	#i think nathan advised this, to handle non-root user (SFR: improved/simplified)
+	chmod "$BASE/$N" --reference="$N"
+	OWNERSHIP="`stat -c %u:%g "$N"`"
+	chown $OWNERSHIP "$BASE/$N"
+	touch "$BASE/$N" --reference="$N"
+	# wh
+	DN="${N%/*}"  #dirname
+	BN="${N##*/}" #basename
+	if [ "$DN" = "$N" ] || [ "$DN" = "" ] ; then
+		DN="."
+	fi
+	if [ -e "$BASE/$DN/.wh.${BN}" ] ; then
+		rm $V "$BASE/$DN/.wh.${BN}" #.wh.DIR makes aufs hide the file
+	fi
+done
+
+# =============================================================================
+# FILES
+# =============================================================================
+
+FREEBASE=`df -B 1 | grep -w "$BASEMTP"| head -n 1 | tr -s ' ' | cut -f 4 -d ' '` #110212 Jemimah #110222 shinobar # SFR: result in bytes (see 'find' below)
+
+rm -f /tmp/snapmerge13-nospace #110222 shinobar
+rm -f /tmp/snapmerge13-error   #140102 SFR
+
+# Move files
+# SFR: move as much as possible into 'find' itself
+# Limitation - files with newline (\n) in its name are processed wrong (but this is not a new issue)
+# 	   -not \( -regex '^./root/\.cache/moon.*|^./root/\.cache/mozilla.*' \)
+find . -mount \
+	   -mindepth 1 \
+	   -not -type d \
+	   -regextype posix-extended \
+	   -not \( -regex '.*/\.wh\.[^\]*' -type f \) \
+	   -not \( -regex '^./mnt/.*|^./media/.*|^./proc/.*|^./sys/.*|^./run/.*|^./tmp/.*|^./pup_.*|^./zdrv_.*|^./root/tmp.*|.*_zdrv_.*|^./dev/\..*|^./\.wh\..*|^./var/run.*|^./root/ftpd.*|^./var/tmp.*|.*\.XLOADED$' \) \
+	   -not \( -regex '.*\.thumbnails.*|.*/thumbnails/.*|.*\.part$|.*\.crdownload$' \) \
+	   -printf "%s %C@ %P\n" |
+while read -r NSIZE NCTIME N
+do
+	# graceful exit if shutdown X (see /usr/bin/restartwm,wmreboot,wmpoweroff)...
+	if [ "$XRUNNING" = "yes" ] && [ -f /tmp/wmexitmode.txt ] ; then
+		exit
+	fi
+
+	if [ ! -e "$N" ] && [ ! -L "$N" ] ; then
+		continue # SFR: skip non-existing files (btw, '-e' won't detect broken symlinks, so '-L' is necessary!)
+	fi
+
+	# check free space only if filesize > 10kb ...
+	if [ $NSIZE -gt 10000 ] ; then
+		#stop saving if not enough room left in ${DISTRO_FILE_PREFIX}save file...
+		if [ $((NSIZE+204800)) -gt $FREEBASE ]; then	# 204800 = 200K slack space
+			FREEBASE=`df -B 1 | grep -w "$BASEMTP" | head -n 1 | tr -s ' ' | cut -f 4 -d ' '` #110212 Jemimah: this is very slow; try not to check every iteration #110222 shinobar: fix for pup_ro10 and more
+			if [ $((NSIZE+204800)) -gt $FREEBASE ]; then	#110212 Jemimah.
+				touch /tmp/snapmerge13-nospace  #110222 shinobar
+				break
+			fi
+		else
+			FREEBASE=$((FREEBASE-NSIZE)) #110212 Jemimah: keep track of the worst case
+		fi
+	fi
+
+	if [ -e "$BASE/$N" ] || [ -L "$BASE/$N" ] ; then
+		rm -rf "$BASE/$N"
+	fi
+	sync
+	#cp -af $V --remove-destination "$N" "$BASE/$N" 2>>/tmp/snapmerge13-error
+	mv -f $V "$N" "$BASE/$N" 2>>/tmp/snapmerge13-error
+	sync
+
+	DN="${N%/*}"  #dirname
+	BN="${N##*/}" #basename
+	if [ "$DN" = "$N" ] || [ "$DN" = "" ] ; then
+		DN="."
+	fi
+	if [ -e "$BASE/$DN/.wh.${BN}" ] ; then
+		rm $V "$BASE/$DN/.wh.${BN}" #.wh.FILE makes aufs hide the file
+	fi
+
+done
+
+# Free up some ram..
+find . -mount \
+	   -mindepth 1 \
+	   -not -type d \
+	   -regextype posix-extended \
+	   \( -regex '.*\.thumbnails.*|.*/thumbnails/.*' \) | \
+while read -r N
+do
+	rm -f "$N"
+done
+
+# =============================================================================
+
+sync
+# SFR: fix for .wh files not being created (in some cases) in pup_rw
+# force re-evalution of all the layers
+busybox mount -t aufs -o remount,udba=reval unionfs /
+
+sync
+cd "$WD"
+
+# =============================================================================
+
+error_msg () {
+	if [ "$SHUTDOWN" = "no" -a "$XRUNNING" = "yes" ];then
+		export DISPLAY=':0'
+		/usr/lib/gtkdialog/box_splash -timeout 30 -close box -icon gtk-dialog-warning -bg red -text "$1"
+	else
+		echo "$1"
+	fi
+}
+
+export LANG="$OLDLANG"
+ERRSTATUS=0
+
+if [ -f /tmp/snapmerge13-nospace ]; then #110222 shinobar
+	ERRMSG="$(gettext 'WARNING!
+Unable to save all files. You need to delete some.')"
+	error_msg "$ERRMSG"
+	ERRSTATUS=1
+fi
+
+if [ -f /tmp/snapmerge13-error ] ; then
+	sed -i '/No such file or directory/d' /tmp/snapmerge13-error	# discard errors caused by bad timing
+	if [ -s /tmp/snapmerge13-error ]; then	#140102 SFR
+		ERRMSG="$(gettext "WARNING!
+There were some errors detected.
+(see '/tmp/snapmerge13-error' for details)
+Filesystem check of the savefile (pfix=fsck) is highly recommended.")"
+		error_msg "$ERRMSG"
+		ERRSTATUS=1
+	fi
+fi
+
+exit $ERRSTATUS
+
+# =============================================================================

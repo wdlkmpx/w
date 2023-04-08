@@ -1,0 +1,60 @@
+# dropbear
+
+. ../func
+. ../build.conf
+
+URL=https://matt.ucc.asn.au/dropbear/releases
+PKG=dropbear
+VER=2015.67
+COMP=tar.bz2
+DESC="a very light weight ssh client and server"
+DEPS=
+CAT=BuildingBlock
+DESKTOP=dropbear.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+build() {
+	cd ${PKG}-${VER}
+	./configure --prefix=/usr \
+				--localstatedir=/var \
+				--sysconfdir=/etc \
+				--libdir=/usr/${LIBDIR} \
+				--disable-syslog \
+				--disable-utmp \
+				--disable-utmpx \
+				--disable-wtmp \
+				--disable-wtmpx \
+				--disable-pututline \
+				--disable-pututxline
+	[ "$?" -eq 0 ] || exit
+	make PROGRAMS="dropbear dbclient dropbearkey dropbearconvert scp ssh" MULTI="1"
+	[ "$?" -eq 0 ] || exit
+	make install MULTI="1" DESTDIR=$CWD/${PKG}-install 
+	cd -
+}
+	
+package_ext() {
+	# EXTRAS
+	install -d -m 0755 ${PKG}-install/etc/init.d
+	install -m 0644 rc.dropbear ${PKG}-install/etc/init.d
+	(cd ${PKG}-install/usr/bin; ln -sf dropbearmulti scp; ln -sf dropbearmulti ssh)
+}
+
+# main
+retrieve "${PKG}-${VER}.${COMP} --no-check-certificate"
+extract ${PKG}-${VER}.${COMP}
+build
+package	
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

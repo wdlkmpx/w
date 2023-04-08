@@ -1,0 +1,33 @@
+# libdvdnav
+
+. ../func
+. ../build.conf
+URL=http://www.videolan.org/pub/videolan/libdvdnav/5.0.3
+#URL=http://dvdnav.mplayerhq.hu/releases
+PKG=libdvdnav
+VER=5.0.3 #28-jan-2015
+COMP=tar.bz2
+DESC="DVD navigation library"
+DEPS=+libdvdread
+CAT=BuildingBlock
+DESKTOP=libdvdnav.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+#(cd ${PKG}-${VER}; ./autogen.sh)
+build_configure $PKG $VER $LIBDIR
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

@@ -1,0 +1,32 @@
+# djvulibre
+
+. ../func
+. ../build.conf
+
+URL=http://downloads.sourceforge.net/djvu/
+PKG=djvulibre
+VER=3.5.25
+COMP=tar.gz
+DESC="DjVu is a web-centric format and software platform for distributing documents and images"
+DEPS=+poppler
+CAT=BuildingBlock
+DESKTOP=
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+# main
+retrieve ${PKG}-${VER}.3.${COMP}
+extract ${PKG}-${VER}.3.${COMP}
+build_configure $PKG $VER $LIBDIR
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT

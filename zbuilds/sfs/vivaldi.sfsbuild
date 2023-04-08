@@ -1,0 +1,281 @@
+#!/bin/sh
+#
+# create sfs of vivaldi stable
+#
+# https://vivaldi.com/download/archive/?platform=linux
+#
+# i686:
+# - last	   = 3.8.2259.42
+# - last good? = 3.7.2218.52
+
+S_COMP="-comp gzip" #xz gzip lzo lz4
+
+### https://github.com/gorhill/uBlock/releases
+UB_VERSION=1.47.4
+#UB_URL=https://github.com/gorhill/uBlock/releases/download/${UB_VERSION}/uBlock0_${UB_VERSION}.chromium.zip
+
+# ====================================================================
+
+help() {
+	echo "Syntax:
+    $0 <32|64>
+    $0 <i686|x86_64>
+
+  32 = last i686 version
+  64 = latest x86_64 version
+
+Special recognized versions:
+
+  32_3.7 (last good i686)  [also 64_3.7]
+  64_5.7
+"
+	exit
+}
+
+
+case $1 in
+	32|i?86|x86|32_3.7)
+		VER=3.7.2218.52
+		URL=https://downloads.vivaldi.com/stable/vivaldi-stable_${VER}-1_i386.deb
+		# WIDEVINE zip pkg is only required for i686
+		WIDEVINE_URL=https://dl.google.com/widevine-cdm/4.10.1582.2-linux-ia32.zip
+		WIDEVINE_FILE=widevine-$(basename "$WIDEVINE_URL")
+		WIDEVINE_LIBDIR=_platform_specific/linux_x86
+		FFMPEG_VERSION='89.0.4389.82-0ubuntu0.16.04.1'
+		FFMPEG_URL=https://launchpadlibrarian.net/526738274/chromium-codecs-ffmpeg-extra_${FFMPEG_VERSION}_i386.deb
+		ARCH='i686'
+		;;
+	64_3.7)
+		VER=3.7.2218.52
+		URL=https://downloads.vivaldi.com/stable/vivaldi-stable_${VER}-1_amd64.deb
+		FFMPEG_VERSION='89.0.4389.82-0ubuntu0.16.04.1'
+		FFMPEG_URL=https://launchpadlibrarian.net/526730027/chromium-codecs-ffmpeg-extra_${FFMPEG_VERSION}_amd64.deb
+		ARCH='x86_64'
+		;;
+	64|x86_64|64_5.7)
+		VER=5.7.2921.60
+		URL=https://downloads.vivaldi.com/stable/vivaldi-stable_${VER}-1_amd64.deb
+		#### the URL doesn't exist, can't update libffmpeg.so
+		#### it looks like Vivaldi comes with a newer ffmpeg, so this is not good anyway
+		#FFMPEG_VERSION_DEB='108.0.5327.0-0ubuntu9.18.04'
+		#FFMPEG_URL="https://launchpadlibrarian.net/628079667/chromium-codecs-ffmpeg-extra_${FFMPEG_VERSION_DEB}_amd64.deb"
+		BROKEN_FFMPEG_URL=1
+		ARCH='x86_64'
+		;;
+	64-old)
+		VER=
+		URL=https://downloads.vivaldi.com/stable/vivaldi-stable_${VER}-1_i386.deb
+		ARCH='x86_64'
+		;;
+	*)
+		help
+		;;
+esac
+
+VERSION=$VER
+OUTPUT_DIR=$(pwd)/output
+mkdir -p $(pwd)/output
+. ./0common_functions.sh
+
+# ====================================================================
+
+mkdir -p tmp
+cd tmp
+
+
+CWD=$(pwd)
+
+if [ -n "$UB_URL" ] ; then
+	common_dl_file ${UB_URL}
+	ublock_origin=$(pwd)/${UB_URL##*/} #basename
+fi
+common_dl_file ${URL}
+if [ -n "$WIDEVINE_URL" ] ; then
+	common_dl_file "${WIDEVINE_URL}" ${WIDEVINE_FILE}
+fi
+if [ -n "$FFMPEG_URL" ] ; then
+	common_dl_file "${FFMPEG_URL}"
+fi
+
+#======================================================================
+
+vivaldi_script='#!/bin/sh
+APULSE=
+if type apulse >/dev/null 2>&1 ; then
+	APULSE="apulse"
+fi
+if type pulseaudio >/dev/null 2>&1 ; then
+	APULSE=
+elif [ -f /usr/bin/pactl ] ; then
+	APULSE=
+fi
+
+#========================================================
+
+case $0 in *portable)
+	LAUNCHDIR="$(dirname "$(readlink -f "$0")")"
+	if ! [ -d "$LAUNCHDIR/profile" ] ; then
+		rm -rf "$LAUNCHDIR/profile"
+		mkdir "$LAUNCHDIR/profile" 2> /dev/null
+		chmod 777 "$LAUNCHDIR/profile"
+	fi
+	export LD_LIBRARY_PATH=${LAUNCHDIR}:${LAUNCHDIR}/lib:${LD_LIBRARY_PATH}
+	exec $spot $APULSE "$LAUNCHDIR/vivaldi-bin" \
+		--no-sandbox \
+		--user-data-dir=$LAUNCHDIR/profile \
+		--disable-infobars "$@"
+	exit
+esac
+
+#========================================================
+
+spot=
+if [ $(id -u) -eq 0 ]; then
+	if [ -f /usr/sbin/run-as-spot ] ; then
+		spot="run-as-spot"
+	fi
+	# pup_volume_monitor_socket must be writable by all.
+	if [ -e /tmp/pup_volume_monitor_socket ] ; then
+		chmod 777 /tmp/pup_volume_monitor_socket
+	fi
+fi
+
+exec $spot $APULSE /opt/vivaldi/vivaldi --no-sandbox --disable-infobars "$@"
+'
+
+#======================================================================
+
+set -x
+
+unset UPDATE_FFMPEG
+unset UPDATE_WIDEVINE
+
+cd ${CWD}
+
+FILE=${URL##*/}
+if [ -n "$UB_URL" ] ; then
+	PKGDIR=vivaldi-${VERSION}-${ARCH}-ubo
+else
+	PKGDIR=vivaldi-${VERSION}-${ARCH}
+fi
+
+mkdir -p ${PKGDIR}/opt/vivaldi
+
+# deb pkg already installs to /opt/vivaldi
+dpkg-deb -x ${CWD}/${FILE} ${PKGDIR}
+sync
+# remove unwanted files
+rm -f $(ls ${PKGDIR}/opt/vivaldi/locales/*.pak | grep -vE 'es\.pak|en-US\.pak')
+# overwrite unwanted script
+ln -snfv vivaldi-bin ${PKGDIR}/opt/vivaldi/vivaldi
+# these are not needed, the update happens right here
+if [ -f ${PKGDIR}/opt/vivaldi/update-ffmpeg ] ; then
+	chmod -x ${PKGDIR}/opt/vivaldi/update-ffmpeg
+	if [ ! "$BROKEN_FFMPEG_URL" ] ; then
+		UPDATE_FFMPEG=1
+	fi
+fi
+if [ -f ${PKGDIR}/opt/vivaldi/update-widevine ] ; then
+	chmod -x ${PKGDIR}/opt/vivaldi/update-widevine
+	if [ ! "$BROKEN_WINEVINE_URL" ] ; then
+		UPDATE_WIDEVINE=1
+	fi
+fi
+if [ "$ARCH" != "i686" ] ; then
+    unset UPDATE_WIDEVINE
+fi
+if [ -L ${PKGDIR}/opt/vivaldi/WidevineCdm ] ; then
+	# this symlink is debian-specific
+	rm -fv ${PKGDIR}/opt/vivaldi/WidevineCdm
+	mkdir -p ${PKGDIR}/opt/vivaldi/WidevineCdm
+fi
+mkdir -p ${PKGDIR}/opt/vivaldi/extensions
+
+
+# move unwanted files for further inspection
+mkdir -p ${PKGDIR}-deleted
+mv -f ${PKGDIR}/etc ${PKGDIR}-deleted/
+mv -f ${PKGDIR}/usr ${PKGDIR}-deleted/
+
+mkdir -p ${PKGDIR}/usr/bin
+mkdir -p ${PKGDIR}/usr/share/applications
+mkdir -p ${PKGDIR}/usr/share/pixmaps
+
+if [ "$UPDATE_FFMPEG" ] && [ -z "$FFMPEG_URL" ] ; then
+	set +x
+	echo "It look likes this version ($VER) is not fully supported"
+	echo "Need to update Widevine and/or libffmpeg.so"
+	echo "Go to to: "
+	echo "  ${PKGDIR}/opt/vivaldi"
+	echo
+	echo "And extract the relevant data from:"
+	echo "- update-ffmpeg   (and/or)"
+	echo "- update-widevine"
+	exit 1
+fi
+
+(
+	#-- Widevine
+	if [ "$UPDATE_WIDEVINE" ] ; then
+		cd ${PKGDIR}/opt/vivaldi
+		#rm -rf WidevineCdm
+		mkdir -p WidevineCdm
+		cd WidevineCdm
+		mkdir -p ${WIDEVINE_LIBDIR}
+		unzip ${CWD}/${WIDEVINE_FILE}
+		chmod 644 *
+		mv -fv libwidevinecdm.so ${WIDEVINE_LIBDIR}/
+		cd ..
+	fi
+	#-- libffmpeg.so
+	if [ "$UPDATE_FFMPEG" ] ; then
+		cd lib
+		dpkg-deb -X ${CWD}/$(basename "$FFMPEG_URL") .
+		sync
+		if [ -d usr ] ; then
+			ffmpeg_so=$(find usr -name libffmpeg.so)
+			cp -av --remove-destination ${ffmpeg_so} .
+			chmod 644 *.so
+			rm -rf usr
+		else
+			echo "error: where to find new libffmpeg.so?"
+			pwd
+			exit 1
+		fi
+		cd ..
+	fi
+)
+
+#-------------------------------------------
+
+cp ${PKGDIR}/opt/vivaldi/product_logo_64.png ${PKGDIR}/usr/share/pixmaps/vivaldi.png
+
+cat > ${PKGDIR}/usr/bin/vivaldi <<EOF
+$vivaldi_script
+EOF
+chmod +x ${PKGDIR}/usr/bin/vivaldi
+
+cat > ${PKGDIR}/usr/share/applications/vivaldi.desktop <<EOF
+[Desktop Entry]
+Encoding=UTF-8
+Name=vivaldi $VER
+Comment=vivaldi $VER
+Icon=/usr/share/pixmaps/vivaldi.png
+Exec=vivaldi
+Terminal=false
+Type=Application
+Categories=WebBrowser
+MimeType=application/pdf;application/rdf+xml;application/rss+xml;application/xhtml+xml;application/xhtml_xml;application/xml;image/gif;image/jpeg;image/png;image/webp;text/html;text/xml;x-scheme-handler/ftp;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/mailto;
+GenericName=Vivaldi web browser
+EOF
+
+cat > ${PKGDIR}/opt/vivaldi/vivaldi-portable <<EOF
+$vivaldi_script
+EOF
+chmod +x ${PKGDIR}/opt/vivaldi/vivaldi-portable
+
+cd ${CWD}
+mksquashfs ${PKGDIR} ${PKGDIR}.sfs ${S_COMP}
+sha256sum ${PKGDIR}.sfs > ${PKGDIR}.sfs.sha256.txt
+mv ${PKGDIR}.sfs* ${OUTPUT_DIR}
+

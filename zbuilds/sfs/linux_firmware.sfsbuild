@@ -1,0 +1,52 @@
+#!/bin/sh
+# 
+# https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git
+# https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/
+#
+
+S_COMP="-comp gzip" #xz gzip lzo lz4
+
+FVER=20230210
+#URL=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/snapshot/linux-firmware-${FVER}.tar.gz
+URL='https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/+archive/bf4115c1aa2bee686ec675595271da50611684b5.tar.gz'
+FILE=linux-firmware-${FVER}.tar.gz
+BASENAME=${FILE%.tar*}
+
+OUTPUT_DIR=$(pwd)/output
+mkdir -p $(pwd)/output
+. ./0common_functions.sh
+
+#==============================================================
+
+mkdir -p tmp
+cd tmp
+common_dl_file "$URL" "$FILE"
+cd ..
+
+PKGDIR=$(pwd)/${BASENAME//linux-firmware/linux_firmware}
+
+case "$URL" in *googlesource*)
+	# google's tarball does not contain $BASENAME as the main dir inside tarball
+	mkdir -p ${BASENAME}
+	tardir="--directory=$BASENAME"
+	;;
+esac
+
+if ! tar -xf tmp/${FILE} ${tardir} ; then
+	exit
+fi
+
+rm -rf ${PKGDIR}
+mkdir -p ${PKGDIR}
+
+cd ${BASENAME}
+make DESTDIR=${PKGDIR} install
+cd ..
+
+common_dir2sfs ${PKGDIR}
+
+sync
+rm -rf ${PKGDIR}
+rm -rf ${BASENAME}
+
+### END ###

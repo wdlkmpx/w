@@ -1,0 +1,57 @@
+# wvstreams
+
+. ../func
+. ../build.conf
+
+URL=http://distro.ibiblio.org/puppylinux/sources/w
+PKG=wvstreams
+VER=4.6.1
+COMP=tar.bz2
+DESC="libraries for wvdial"
+DEPS=
+CAT=BuildingBlock
+DESKTOP=wvstreams.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+patch_me() {
+	for patch in *patch; do
+		echo "Applying $patch"
+		patch -p0 < $patch
+	done
+}
+
+build() {
+	cd ${PKG}-${VER}
+	PCFLAGS="-fPIC -fpermissive -fno-strict-aliasing -fno-tree-dce -fno-optimize-sibling-calls"
+	CFLAGS="$PCFLAGS" \
+	CXXFLAGS="$PCFLAGS" \
+	./configure --prefix=/usr \
+				--localstatedir=/var \
+				--sysconfdir=/etc \
+				--libdir=/usr/${LIBDIR} \
+				--disable-testgui
+	[ "$?" -eq 0 ] || exit
+	make
+	[ "$?" -eq 0 ] || exit
+	make DESTDIR=$CWD/${PKG}-install install
+	cd -
+}
+	
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+patch_me
+build
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

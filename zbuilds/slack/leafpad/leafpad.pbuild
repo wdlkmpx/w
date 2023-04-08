@@ -1,0 +1,47 @@
+# leafpad
+
+. ../func
+. ../build.conf
+
+URL=http://savannah.nongnu.org/download/leafpad/
+PKG=leafpad
+VER=0.8.18.1
+COMP=tar.gz
+DESC="Light weight gtk text editor"
+DEPS=+gtk+2
+CAT=Document
+DESKTOP=leafpad.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+fixup() {
+	cd ${PKG}-${VER}
+	chmod 755 *sh
+	cd -
+}
+
+patch_me() {
+	for i in *patch;do
+	patch -p0 < $i
+	done
+	sleep 1
+}
+
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+fixup
+patch_me
+build_configure $PKG $VER $LIBDIR
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

@@ -1,0 +1,40 @@
+# libgnomeprint
+
+. ../func
+. ../build.conf
+
+URL=http://ftp.heanet.ie/mirrors/ftp.gnome.org/sources/libgnomeprint/2.18
+PKG=libgnomeprint
+VER=2.18.8
+COMP=tar.bz2
+DESC="The GNOME printer access library"
+DEPS=+libart,+libgnomecups,+libxml,+perl-xml-parser
+CAT=BuildingBlock
+DESKTOP=libgnomeprint.desktop
+BUILD=
+CWD=$(pwd)
+[ -z "$MWD" ] && MWD=$(dirname $CWD)	
+[ -z "$BUILD" ] && BUILD=$DEF_BUILD
+[ -f "$DESKTOP" ] || DESKTOP=not
+[ -z "$DEPS" ] && DEPS=not	
+
+ARCH=$(uname -m)
+case $ARCH in
+ *64) 	LIBDIR=$LIBCONF64 ;;
+ arm*)	LIBDIR=$LIBCONFarm;;
+ *) 	LIBDIR=$LIBCONF32 ;;
+esac
+
+patch_me() {
+	for i in *.patch; do
+		echo "Applying $i"
+		(cd ${PKG}-${VER}; patch -p1 < ../$i) || exit 1
+	done
+}
+
+# main
+retrieve ${PKG}-${VER}.${COMP}
+extract ${PKG}-${VER}.${COMP}
+patch_me
+build_configure $PKG $VER $LIBDIR
+package_std $PKG $VER $ARCH $DESKTOP "$DESC" $DEPS $CAT	

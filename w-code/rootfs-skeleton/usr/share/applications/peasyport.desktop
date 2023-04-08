@@ -1,0 +1,10 @@
+[Desktop Entry]
+Encoding=UTF-8
+Name=PeasyPort LAN scanner
+Icon=/usr/share/pixmaps/peasyport.svg
+Comment=Network port scanner
+Exec=peasyport
+Terminal=false
+Type=Application
+Categories=Network
+GenericName=PeasyPort
